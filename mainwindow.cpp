@@ -13,18 +13,28 @@ static const int BASE_R = 30; // 기본 반지름
 // 적군 정의: {typeName, 크기배율, 속도등급(1당 3px), 점수}
 struct EnemyDef { QString name; float size; int speedTier; int points; };
 static const EnemyDef ENEMY_DEFS[] = {
-    {"raremon", 3.0f, 1, 1},
-    {"gajimon", 3.0f, 2, 3},
-    {"picomon", 3.0f, 3, 5},
-    {"oogamon", 6.0f, 2, 5},
+    {"raremon", 3.0f, 1, 10},
+    {"gajimon", 3.0f, 2, 30},
+    {"picomon", 3.0f, 3, 50},
+    {"oogamon", 6.0f, 2, 70},
 };
 static const EnemyDef ALLY_DEFS[] = {
-    {"padakmon",  2.0f, 1, -1},
-    {"dongulmon", 2.0f, 2, -3},
-    {"agumon",    3.0f, 2, -2},
-    {"tentamon",  3.0f, 3, -2},
-    {"metamon",   2.0f, 1, -5},
+    {"padakmon",  2.0f, 1, -10},
+    {"dongulmon", 2.0f, 2, -30},
+    {"agumon",    3.0f, 2, -50},
+    {"tentamon",  3.0f, 3, -30},
+    {"metamon",   2.0f, 1, -10},
 };
+
+static bool isGroundUnit(const QString &name) {
+    return name == "agumon" || name == "dongulmon" || name == "metamon"
+        || name == "oogamon" || name == "raremon";
+}
+
+static int randomDirChangeFrames() {
+    // 2~3초 = 66~100 프레임 (30ms 간격)
+    return QRandomGenerator::global()->bounded(66, 101);
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
@@ -33,7 +43,7 @@ MainWindow::MainWindow(QWidget *parent)
       aimStep(20),
       aimRadius(18),
       score(0),
-      remainingTimeMs(30000),
+      gameDurationMs(30000),
       fireEffect(false),
       hitEffect(false),
       hitEffectFrames(0),
@@ -71,8 +81,15 @@ MainWindow::MainWindow(QWidget *parent)
 
     howToPlay1Pixmap = QPixmap(":/images/how_to_play1.png");
     howToPlay2Pixmap = QPixmap(":/images/how_to_play2.png");
+    howToPlay3Pixmap = QPixmap(":/images/how_to_play3.png");
     howToPlayPage = 0;
-    howToPlayTimerMs = 0;
+    howToPlayDurationMs = 3000;
+
+    ready1Pixmap = QPixmap(":/images/ready_1.png");
+    ready2Pixmap = QPixmap(":/images/ready_2.png");
+    ready3Pixmap = QPixmap(":/images/ready_3.png");
+    loadingPixmap = QPixmap(":/images/loading.png");
+    countdownPage = 0;
 
     // apple.png 격자무늬(체커보드) 배경 제거 + 절반 크기
     if (!applePixmap.isNull()) {
@@ -98,6 +115,12 @@ MainWindow::MainWindow(QWidget *parent)
     bushPixmap = QPixmap(":/images/bush.png");
     leafPixmap = QPixmap(":/images/leaf.png");
 
+    // 좌우 반전 leaf
+    if (!leafPixmap.isNull()) {
+        leafFlippedPixmap = QPixmap::fromImage(leafPixmap.toImage().mirrored(true, false));
+        leafFlippedMaskImage = leafFlippedPixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+    }
+
     if (!treePixmap.isNull())
         treeMaskImage = treePixmap.toImage().convertToFormat(QImage::Format_ARGB32);
     if (!bushPixmap.isNull())
@@ -106,9 +129,13 @@ MainWindow::MainWindow(QWidget *parent)
         leafMaskImage = leafPixmap.toImage().convertToFormat(QImage::Format_ARGB32);
 
     // 초기 벽 위치 설정 (resizeEvent 전에 미리)
-    treeRect = QRect(60, 260, 180, 320);
-    bushRect = QRect(744, 230, 200, 140);
-    leafRect = QRect(392 - 120, 50 - 70, 240, 140);
+    treeRects[0] = QRect(60, 260, 180, 320);
+    treeRects[1] = QRect(780, 240, 160, 300);
+    bushRects[0] = QRect(744, 230, 200, 140);
+    bushRects[1] = QRect(120, 200, 180, 130);
+    leafRects[0] = QRect(272, -20, 240, 140);
+    leafRects[1] = QRect(500, 30, 200, 130);
+    leafRects[2] = QRect(700, 10, 200, 130);  // 반전 leaf
 
     setupUiButtons();
     resetTargets();
@@ -210,7 +237,7 @@ QPoint MainWindow::randomPos()
     int minX = margin;
     int maxX = qMax(minX + 1, width()  - margin);
     int minY = 110;
-    int maxY = qMax(minY + 1, height() - 270);
+    int maxY = qMax(minY + 1, height() - 140);
     return QPoint(
         QRandomGenerator::global()->bounded(minX, maxX),
         QRandomGenerator::global()->bounded(minY, maxY)
@@ -224,8 +251,22 @@ Target MainWindow::spawnEnemy()
     int spd = d.speedTier * 3;
     int sx  = QRandomGenerator::global()->bounded(2) ? spd : -spd;
     int sy  = QRandomGenerator::global()->bounded(2) ? spd : -spd;
-    return { randomPos(), sx, sy,
-             (int)(BASE_R * d.size), d.points, true, d.name };
+    Target t;
+    t.pos = randomPos();
+    t.speedX = sx;
+    t.speedY = sy;
+    t.radius = (int)(BASE_R * d.size);
+    t.points = d.points;
+    t.isEnemy = true;
+    t.typeName = d.name;
+    t.dirChangeFrames = randomDirChangeFrames();
+    // 지상 유닛은 하반부에 스폰
+    if (isGroundUnit(d.name)) {
+        int groundMinY = height() / 2 - 20;
+        int groundMaxY = qMax(groundMinY + 1, height() - 140);
+        t.pos.setY(QRandomGenerator::global()->bounded(groundMinY, groundMaxY));
+    }
+    return t;
 }
 
 Target MainWindow::spawnAlly()
@@ -235,8 +276,21 @@ Target MainWindow::spawnAlly()
     int spd = d.speedTier * 3;
     int sx  = QRandomGenerator::global()->bounded(2) ? spd : -spd;
     int sy  = QRandomGenerator::global()->bounded(2) ? spd : -spd;
-    return { randomPos(), sx, sy,
-             (int)(BASE_R * d.size), d.points, false, d.name };
+    Target t;
+    t.pos = randomPos();
+    t.speedX = sx;
+    t.speedY = sy;
+    t.radius = (int)(BASE_R * d.size);
+    t.points = d.points;
+    t.isEnemy = false;
+    t.typeName = d.name;
+    t.dirChangeFrames = randomDirChangeFrames();
+    if (isGroundUnit(d.name)) {
+        int groundMinY = height() / 2 - 20;
+        int groundMaxY = qMax(groundMinY + 1, height() - 140);
+        t.pos.setY(QRandomGenerator::global()->bounded(groundMinY, groundMaxY));
+    }
+    return t;
 }
 
 void MainWindow::resetTargets()
@@ -274,9 +328,13 @@ bool MainWindow::lineHitsWallMask(QPoint from, QPoint to) const
     int steps = qMax(qAbs(dx), qAbs(dy));
 
     auto pointBlocked = [&](const QPoint &p) {
-        if (pointHitsOpaquePixel(treeMaskImage, treeRect, p)) return true;
-        if (pointHitsOpaquePixel(bushMaskImage, bushRect, p)) return true;
-        if (pointHitsOpaquePixel(leafMaskImage, leafRect, p)) return true;
+        for (int i = 0; i < 2; i++)
+            if (pointHitsOpaquePixel(treeMaskImage, treeRects[i], p)) return true;
+        for (int i = 0; i < 2; i++)
+            if (pointHitsOpaquePixel(bushMaskImage, bushRects[i], p)) return true;
+        for (int i = 0; i < 2; i++)
+            if (pointHitsOpaquePixel(leafMaskImage, leafRects[i], p)) return true;
+        if (pointHitsOpaquePixel(leafFlippedMaskImage, leafRects[2], p)) return true;
         return false;
     };
 
@@ -346,6 +404,7 @@ void MainWindow::updateButtonLayout()
     bool isMenu       = (gameState == Menu);
     bool isCal        = (gameState == Calibrating);
     bool isHowTo      = (gameState == HowToPlay);
+    bool isCountdown  = (gameState == Countdown);
     bool isBriefing   = (gameState == Briefing);
     bool isGameOver   = (gameState == GameOver);
 
@@ -359,13 +418,14 @@ void MainWindow::updateButtonLayout()
     btnRetry->setVisible(isGameOver);
     btnMainMenu->setVisible(isGameOver);
 
-    // HowToPlay 상태에서는 모든 버튼 숨김
-    if (isHowTo) {
+    // HowToPlay / Countdown 상태에서는 모든 버튼 숨김
+    if (isHowTo || isCountdown) {
         btnUp->setVisible(false);
         btnDown->setVisible(false);
         btnLeft->setVisible(false);
         btnRight->setVisible(false);
         btnFire->setVisible(false);
+        btnNext->setVisible(false);
     }
 }
 
@@ -375,11 +435,14 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
     centerPos = QPoint(width() / 2, height() / 2);
 
-    // 장애물 배치: tree 하단 좌측 / bush 중간 우측 / leaf 상단 나무줄기
-    treeRect = QRect(width() / 2 - 90, height() - 330, 180, 320);
-    bushRect = QRect(width() - 380, height() / 2 + 35, 200, 140);
-    leafRect = QRect(width() / 2 - 300, 85, 180, 210);
-
+    // 장애물 배치: tree x2, bush x2, leaf x3
+    treeRects[0] = QRect(90, height() / 2 - 60, 180, 320);
+    treeRects[1] = QRect(width() - 220, height() - 310, 160, 300);
+    bushRects[0] = QRect(225, height() / 2 + 35, 250, 175);
+    bushRects[1] = QRect(width() - 500, height() / 2 - 40, 200, 140);
+    leafRects[0] = QRect(width() / 2 - 240, 85, 120, 140);
+    leafRects[1] = QRect(width() - 250, 60, 170, 180);
+    leafRects[2] = QRect(width() / 2 - 90, 30, 150, 160);  // 반전 leaf
     updateButtonLayout();
     clampAim();
 }
@@ -415,7 +478,9 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
     if (gameState == HowToPlay) {
         // 플레이 방법 안내 이미지 전체화면 표시
-        const QPixmap &pm = (howToPlayPage == 0) ? howToPlay1Pixmap : howToPlay2Pixmap;
+        const QPixmap &pm = (howToPlayPage == 0) ? howToPlay1Pixmap
+                          : (howToPlayPage == 1) ? howToPlay2Pixmap
+                          : howToPlay3Pixmap;
         if (!pm.isNull())
             painter.drawPixmap(rect(), pm);
         else
@@ -444,6 +509,18 @@ void MainWindow::paintEvent(QPaintEvent *event)
             "You have 30 seconds. Good luck, Agent.";
 
         painter.drawText(rect().adjusted(80, -40, -80, -80), Qt::AlignLeft | Qt::TextWordWrap, briefing);
+        return;
+    }
+
+    if (gameState == Countdown) {
+        // ready_3 → ready_2 → ready_1 전체화면 표시
+        const QPixmap &pm = (countdownPage == 0) ? ready3Pixmap
+                          : (countdownPage == 1) ? ready2Pixmap
+                          : ready1Pixmap;
+        if (!pm.isNull())
+            painter.drawPixmap(rect(), pm);
+        else
+            painter.fillRect(rect(), QColor(10, 10, 10));
         return;
     }
 
@@ -522,7 +599,10 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.setPen(Qt::white);
     painter.setFont(infoFont);
     painter.drawText(20, 35, QString("Score: %1").arg(score));
-    painter.drawText(20, 70, QString("Time: %1").arg(remainingTimeMs / 1000));
+    int remainingTimeMs = gameDurationMs - (int)gameElapsed.elapsed();
+    if (remainingTimeMs < 0) remainingTimeMs = 0;
+    QString timeStr = QString("Time: %1").arg(remainingTimeMs / 1000);
+    painter.drawText(width() - 180, 35, timeStr);
 
     // 1. 타겟을 먼저 그림 (벽 뒤에 숨겨지도록)
     if (gameState == Playing || gameState == GameOver) {
@@ -544,28 +624,42 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     // 2. 장애물을 나중에 그림 (타겟 위에 덮임)
-    if (!treePixmap.isNull())
-        painter.drawPixmap(treeRect, treePixmap);
-    else {
-        painter.setBrush(QColor(80, 60, 40));
-        painter.setPen(Qt::NoPen);
-        painter.drawRect(treeRect);
+    for (int i = 0; i < 2; i++) {
+        if (!treePixmap.isNull())
+            painter.drawPixmap(treeRects[i], treePixmap);
+        else {
+            painter.setBrush(QColor(80, 60, 40));
+            painter.setPen(Qt::NoPen);
+            painter.drawRect(treeRects[i]);
+        }
     }
 
-    if (!bushPixmap.isNull())
-        painter.drawPixmap(bushRect, bushPixmap);
-    else {
-        painter.setBrush(QColor(30, 100, 40));
-        painter.setPen(Qt::NoPen);
-        painter.drawRect(bushRect);
+    for (int i = 0; i < 2; i++) {
+        if (!bushPixmap.isNull())
+            painter.drawPixmap(bushRects[i], bushPixmap);
+        else {
+            painter.setBrush(QColor(30, 100, 40));
+            painter.setPen(Qt::NoPen);
+            painter.drawRect(bushRects[i]);
+        }
     }
 
-    if (!leafPixmap.isNull())
-        painter.drawPixmap(leafRect, leafPixmap);
+    for (int i = 0; i < 2; i++) {
+        if (!leafPixmap.isNull())
+            painter.drawPixmap(leafRects[i], leafPixmap);
+        else {
+            painter.setBrush(QColor(40, 140, 60));
+            painter.setPen(Qt::NoPen);
+            painter.drawRect(leafRects[i]);
+        }
+    }
+    // 반전 leaf (leafRects[2])
+    if (!leafFlippedPixmap.isNull())
+        painter.drawPixmap(leafRects[2], leafFlippedPixmap);
     else {
         painter.setBrush(QColor(40, 140, 60));
         painter.setPen(Qt::NoPen);
-        painter.drawRect(leafRect);
+        painter.drawRect(leafRects[2]);
     }
 
     // 에임
@@ -616,13 +710,32 @@ void MainWindow::paintEvent(QPaintEvent *event)
 void MainWindow::gameLoop()
 {
     if (gameState == HowToPlay) {
-        howToPlayTimerMs -= 30;
-        if (howToPlayTimerMs <= 0) {
-            if (howToPlayPage == 0) {
-                howToPlayPage = 1;
-                howToPlayTimerMs = 3000;
+        int elapsed = (int)howToPlayElapsed.elapsed();
+        if (elapsed >= howToPlayDurationMs) {
+            if (howToPlayPage < 2) {
+                howToPlayPage++;
+                howToPlayDurationMs = 3000;
+                howToPlayElapsed.restart();
             } else {
                 showBriefing();
+            }
+        }
+        update();
+        return;
+    }
+
+    if (gameState == Countdown) {
+        int elapsed = (int)countdownElapsed.elapsed();
+        if (elapsed >= 1000) {
+            if (countdownPage < 2) {
+                countdownPage++;
+                countdownElapsed.restart();
+            } else {
+                // 카운트다운 완료 → 게임 시작
+                resetGame();
+                gameState = Playing;
+                gameElapsed.start();
+                updateButtonLayout();
             }
         }
         update();
@@ -635,25 +748,45 @@ void MainWindow::gameLoop()
         return;
     }
 
-    remainingTimeMs -= 30;
-    if (remainingTimeMs <= 0) {
-        remainingTimeMs = 0;
+    int remainingMs = gameDurationMs - (int)gameElapsed.elapsed();
+    if (remainingMs <= 0) {
+        remainingMs = 0;
         gameState = GameOver;
         updateButtonLayout();
     }
 
     // 각 타겟 이동
-    int margin = 140;
+    int margin = 120;
     int minX = margin,     maxX = qMax(minX+1, width()  - margin);
-    int minY = 110,        maxY = qMax(minY+1, height() - 270);
+    int minY = 110,        maxY = qMax(minY+1, height() - 120);
 
     for (Target &t : targets) {
+        // 지상 유닛: 방향 전환 타이머
+        if (isGroundUnit(t.typeName)) {
+            t.dirChangeFrames--;
+            if (t.dirChangeFrames <= 0) {
+                int spd = qMax(1, qAbs(t.speedX));
+                t.speedX = QRandomGenerator::global()->bounded(2) ? spd : -spd;
+                t.speedY = QRandomGenerator::global()->bounded(2) ? spd : -spd;
+                t.dirChangeFrames = randomDirChangeFrames();
+            }
+        }
+
         t.pos.rx() += t.speedX;
         t.pos.ry() += t.speedY;
         if (t.pos.x() < minX) { t.pos.setX(minX); t.speedX = qAbs(t.speedX); }
         if (t.pos.x() > maxX) { t.pos.setX(maxX); t.speedX = -qAbs(t.speedX); }
-        if (t.pos.y() < minY) { t.pos.setY(minY); t.speedY = qAbs(t.speedY); }
-        if (t.pos.y() > maxY) { t.pos.setY(maxY); t.speedY = -qAbs(t.speedY); }
+
+        // 지상 유닛: Y 범위를 하반부로 제한
+        if (isGroundUnit(t.typeName)) {
+            int groundMinY = height() / 2 - 20;
+            int groundMaxY = qMax(groundMinY + 1, height() - 120);
+            if (t.pos.y() < groundMinY) { t.pos.setY(groundMinY); t.speedY = qAbs(t.speedY); }
+            if (t.pos.y() > groundMaxY) { t.pos.setY(groundMaxY); t.speedY = -qAbs(t.speedY); }
+        } else {
+            if (t.pos.y() < minY) { t.pos.setY(minY); t.speedY = qAbs(t.speedY); }
+            if (t.pos.y() > maxY) { t.pos.setY(maxY); t.speedY = -qAbs(t.speedY); }
+        }
     }
 
     // 명중 효과 프레임 감소
@@ -708,7 +841,8 @@ void MainWindow::showHowToPlay()
 {
     gameState = HowToPlay;
     howToPlayPage = 0;
-    howToPlayTimerMs = 3000;
+    howToPlayDurationMs = 3000;
+    howToPlayElapsed.start();
     updateButtonLayout();
     update();
 }
@@ -722,8 +856,14 @@ void MainWindow::showBriefing()
 
 void MainWindow::startPlaying()
 {
-    resetGame();
-    gameState = Playing;
+    showCountdown();
+}
+
+void MainWindow::showCountdown()
+{
+    gameState = Countdown;
+    countdownPage = 0;
+    countdownElapsed.start();
     updateButtonLayout();
     update();
 }
@@ -767,7 +907,7 @@ void MainWindow::fire()
                 showHowToPlay();
             }
         }
-        update();
+        // update();
         return;
     }
     if (gameState != Playing) return;
@@ -811,16 +951,15 @@ void MainWindow::fire()
 
 void MainWindow::retryGame()
 {
-    resetGame();
-    gameState = Playing;
-    updateButtonLayout();
-    update();
+    showCountdown();
 }
 
 void MainWindow::goToMainMenu()
 {
     resetGame();
     gameState = Menu;
+    centerPos = QPoint(width() / 2, height() / 2);
+    aimPos = centerPos;
     updateButtonLayout();
     update();
 }
@@ -840,7 +979,7 @@ void MainWindow::clampAim()
 void MainWindow::resetGame()
 {
     score = 0;
-    remainingTimeMs = 30000;
+    gameDurationMs = 30000;
     fireEffect = false;
     hitEffect = false;
     hitEffectFrames = 0;

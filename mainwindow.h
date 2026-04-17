@@ -10,15 +10,17 @@
 #include <QVector>
 #include <QMap>
 #include <QString>
+#include <QElapsedTimer>
 
 struct Target {
     QPoint pos;
     int    speedX;
     int    speedY;
-    int    radius;   // 기본 30을 1로 기준
-    int    points;   // 양수: 적군, 음수: 아군
+    int    radius;
+    int    points;
     bool   isEnemy;
-    QString typeName; // 플리짐 key
+    QString typeName;
+    int    dirChangeFrames; // 방향 전환까지 남은 프레임 (지상 유닛용)
 };
 
 class MainWindow : public QMainWindow
@@ -26,7 +28,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, Calibrating, HowToPlay, Briefing, Playing, GameOver };
+    enum GameState { Menu, Calibrating, HowToPlay, Briefing, Countdown, Playing, GameOver };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -46,6 +48,7 @@ private slots:
     void enterCalibration();
     void showBriefing();
     void showHowToPlay();
+    void showCountdown();
     void startPlaying();
     void retryGame();
     void goToMainMenu();
@@ -84,21 +87,36 @@ private:
     QPixmap applePixmap;
     QPixmap howToPlay1Pixmap;
     QPixmap howToPlay2Pixmap;
-    int     howToPlayPage;      // 0: first image, 1: second image
-    int     howToPlayTimerMs;   // countdown per page
+    QPixmap howToPlay3Pixmap;
+    int     howToPlayPage;
+    int     howToPlayDurationMs;
+    QElapsedTimer howToPlayElapsed;
+
+    // Countdown (ready_3, ready_2, ready_1)
+    QPixmap ready1Pixmap;
+    QPixmap ready2Pixmap;
+    QPixmap ready3Pixmap;
+    QPixmap loadingPixmap;
+    int     countdownPage;      // 0: ready_3, 1: ready_2, 2: ready_1
+    QElapsedTimer countdownElapsed;
+
+    // 장애물: tree x2, bush x2, leaf x3 (leafRects[2]는 좌우반전)
     QPixmap treePixmap;
     QPixmap bushPixmap;
     QPixmap leafPixmap;
+    QPixmap leafFlippedPixmap;
     QImage treeMaskImage;
     QImage bushMaskImage;
     QImage leafMaskImage;
+    QImage leafFlippedMaskImage;
 
-    QRect treeRect;
-    QRect bushRect;
-    QRect leafRect;
+    QRect treeRects[2];
+    QRect bushRects[2];
+    QRect leafRects[3];
 
     int score;
-    int remainingTimeMs;
+    int gameDurationMs;
+    QElapsedTimer gameElapsed;
 
     bool fireEffect;
     bool hitEffect;
