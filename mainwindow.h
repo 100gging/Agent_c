@@ -26,7 +26,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, Calibrating, Briefing, Playing, GameOver };
+    enum GameState { Menu, Calibrating, HowToPlay, Briefing, Playing, GameOver };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -45,6 +45,7 @@ private slots:
     void startGame();
     void enterCalibration();
     void showBriefing();
+    void showHowToPlay();
     void startPlaying();
     void retryGame();
     void goToMainMenu();
@@ -80,6 +81,11 @@ private:
     QMap<QString, QPixmap> pixmaps;
     QMap<QString, QImage> spriteMasks;
     QPixmap backgroundPixmap;
+    QPixmap applePixmap;
+    QPixmap howToPlay1Pixmap;
+    QPixmap howToPlay2Pixmap;
+    int     howToPlayPage;      // 0: first image, 1: second image
+    int     howToPlayTimerMs;   // countdown per page
     QPixmap treePixmap;
     QPixmap bushPixmap;
     QPixmap leafPixmap;
@@ -98,6 +104,9 @@ private:
     bool hitEffect;
     int  hitEffectFrames;
     bool lastHitWasEnemy;
+
+    bool calBoxHit[3];
+    int  calPhase;     // 0: 영점(사과), 1: 3박스 타겟
 
     QPushButton *btnUp;
     QPushButton *btnDown;

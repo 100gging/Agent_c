@@ -13,17 +13,17 @@ static const int BASE_R = 30; // 기본 반지름
 // 적군 정의: {typeName, 크기배율, 속도등급(1당 3px), 점수}
 struct EnemyDef { QString name; float size; int speedTier; int points; };
 static const EnemyDef ENEMY_DEFS[] = {
-    {"raremon", 1.0f, 1, 1},
-    {"gajimon", 1.0f, 2, 3},
-    {"picomon", 1.0f, 3, 5},
-    {"oogamon", 2.0f, 2, 5},
+    {"raremon", 3.0f, 1, 1},
+    {"gajimon", 3.0f, 2, 3},
+    {"picomon", 3.0f, 3, 5},
+    {"oogamon", 6.0f, 2, 5},
 };
 static const EnemyDef ALLY_DEFS[] = {
-    {"padakmon",  1.0f, 1, -1},
-    {"dongulmon", 1.0f, 2, -3},
-    {"agumon",    1.5f, 2, -2},
-    {"tentamon",  1.5f, 3, -2},
-    {"metamon",   1.0f, 1, -5},
+    {"padakmon",  2.0f, 1, -1},
+    {"dongulmon", 2.0f, 2, -3},
+    {"agumon",    3.0f, 2, -2},
+    {"tentamon",  3.0f, 3, -2},
+    {"metamon",   2.0f, 1, -5},
 };
 
 MainWindow::MainWindow(QWidget *parent)
@@ -33,7 +33,7 @@ MainWindow::MainWindow(QWidget *parent)
       aimStep(20),
       aimRadius(18),
       score(0),
-      remainingTimeMs(60000),
+      remainingTimeMs(30000),
       fireEffect(false),
       hitEffect(false),
       hitEffectFrames(0),
@@ -66,7 +66,34 @@ MainWindow::MainWindow(QWidget *parent)
             spriteMasks[it.key()] = it.value().toImage().convertToFormat(QImage::Format_ARGB32);
     }
 
-    backgroundPixmap = QPixmap(":/images/background.png");
+    backgroundPixmap = QPixmap(":/images/background_game.png");
+    applePixmap = QPixmap(":/images/apple.png");
+
+    howToPlay1Pixmap = QPixmap(":/images/how_to_play1.png");
+    howToPlay2Pixmap = QPixmap(":/images/how_to_play2.png");
+    howToPlayPage = 0;
+    howToPlayTimerMs = 0;
+
+    // apple.png 격자무늬(체커보드) 배경 제거 + 절반 크기
+    if (!applePixmap.isNull()) {
+        QImage appleImg = applePixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+        for (int py = 0; py < appleImg.height(); ++py) {
+            for (int px = 0; px < appleImg.width(); ++px) {
+                QRgb pixel = appleImg.pixel(px, py);
+                int r = qRed(pixel), g = qGreen(pixel), b = qBlue(pixel);
+                int maxC = qMax(r, qMax(g, b));
+                int minC = qMin(r, qMin(g, b));
+                // 채도가 낮고 밝은 픽셀 = 체커보드 (회색/흰색)
+                if ((maxC - minC) < 30 && minC > 170) {
+                    appleImg.setPixel(px, py, qRgba(0, 0, 0, 0));
+                }
+            }
+        }
+        applePixmap = QPixmap::fromImage(appleImg).scaled(
+            applePixmap.width() / 2, applePixmap.height() / 2,
+            Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
     treePixmap = QPixmap(":/images/tree.png");
     bushPixmap = QPixmap(":/images/bush.png");
     leafPixmap = QPixmap(":/images/leaf.png");
@@ -79,9 +106,9 @@ MainWindow::MainWindow(QWidget *parent)
         leafMaskImage = leafPixmap.toImage().convertToFormat(QImage::Format_ARGB32);
 
     // 초기 벽 위치 설정 (resizeEvent 전에 미리)
-    treeRect = QRect(90, 80, 220, 360);
-    bushRect = QRect(1024 - 380, 180, 250, 170);
-    leafRect = QRect(1024 / 2 - 140, 130, 280, 160);
+    treeRect = QRect(60, 260, 180, 320);
+    bushRect = QRect(744, 230, 200, 140);
+    leafRect = QRect(392 - 120, 50 - 70, 240, 140);
 
     setupUiButtons();
     resetTargets();
@@ -318,6 +345,7 @@ void MainWindow::updateButtonLayout()
     bool isPlaying    = (gameState == Playing);
     bool isMenu       = (gameState == Menu);
     bool isCal        = (gameState == Calibrating);
+    bool isHowTo      = (gameState == HowToPlay);
     bool isBriefing   = (gameState == Briefing);
     bool isGameOver   = (gameState == GameOver);
 
@@ -330,6 +358,15 @@ void MainWindow::updateButtonLayout()
     btnNext->setVisible(isBriefing);
     btnRetry->setVisible(isGameOver);
     btnMainMenu->setVisible(isGameOver);
+
+    // HowToPlay 상태에서는 모든 버튼 숨김
+    if (isHowTo) {
+        btnUp->setVisible(false);
+        btnDown->setVisible(false);
+        btnLeft->setVisible(false);
+        btnRight->setVisible(false);
+        btnFire->setVisible(false);
+    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)
@@ -338,10 +375,10 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
     centerPos = QPoint(width() / 2, height() / 2);
 
-    // 장애물 배치: 좌측 큰 나무 / 우측 중단 덤불 / 상단 중앙 큰 잎
-    treeRect = QRect(90, qMax(70, height() - 520), 220, 360);
-    bushRect = QRect(width() - 380, qMax(130, height() - 420), 250, 170);
-    leafRect = QRect(width() / 2 - 140, 120, 280, 160);
+    // 장애물 배치: tree 하단 좌측 / bush 중간 우측 / leaf 상단 나무줄기
+    treeRect = QRect(width() / 2 - 90, height() - 330, 180, 320);
+    bushRect = QRect(width() - 380, height() / 2 + 35, 200, 140);
+    leafRect = QRect(width() / 2 - 300, 85, 180, 210);
 
     updateButtonLayout();
     clampAim();
@@ -376,6 +413,16 @@ void MainWindow::paintEvent(QPaintEvent *event)
         return;
     }
 
+    if (gameState == HowToPlay) {
+        // 플레이 방법 안내 이미지 전체화면 표시
+        const QPixmap &pm = (howToPlayPage == 0) ? howToPlay1Pixmap : howToPlay2Pixmap;
+        if (!pm.isNull())
+            painter.drawPixmap(rect(), pm);
+        else
+            painter.fillRect(rect(), QColor(10, 10, 10));
+        return;
+    }
+
     if (gameState == Briefing) {
         // 스토리 / 브리핑 화면
         painter.setFont(bigFont);
@@ -394,7 +441,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
             "[DO NOT SHOOT]  Civilians (non-red)\n\n"
             "Use the directional buttons to aim.\n"
             "Press FIRE to shoot.\n\n"
-            "You have 60 seconds. Good luck, Agent.";
+            "You have 30 seconds. Good luck, Agent.";
 
         painter.drawText(rect().adjusted(80, -40, -80, -80), Qt::AlignLeft | Qt::TextWordWrap, briefing);
         return;
@@ -406,25 +453,66 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.setPen(Qt::white);
         painter.drawText(rect().adjusted(0, -140, 0, 0), Qt::AlignCenter, "CALIBRATION");
 
-        painter.setFont(subFont);
-        painter.setPen(QColor(180, 180, 180));
-        painter.drawText(rect().adjusted(0, -60, 0, 0), Qt::AlignCenter,
-                         "Align the aim (green) to the center target (red)\nthen press FIRE to confirm & start game");
+        if (calPhase == 0) {
+            // Phase 0: 영점 조절 — 사과만 보이고 조준선 없음
+            painter.setFont(subFont);
+            painter.setPen(QColor(180, 180, 180));
+            painter.drawText(rect().adjusted(0, -60, 0, 0), Qt::AlignCenter,
+                             "Aim at the apple and press FIRE to zero in");
 
-        // 중앙 고정 타겟 (맞춰야 할 기준점)
-        QPoint calTarget(width() / 2, height() / 2);
-        painter.setPen(QPen(Qt::red, 3));
-        painter.setBrush(QColor(200, 40, 40, 120));
-        painter.drawEllipse(calTarget, 20, 20);
-        painter.drawLine(calTarget.x() - 35, calTarget.y(), calTarget.x() + 35, calTarget.y());
-        painter.drawLine(calTarget.x(), calTarget.y() - 35, calTarget.x(), calTarget.y() + 35);
+            QPoint calTarget(width() / 2, height() / 2);
+            if (!applePixmap.isNull()) {
+                int ax = calTarget.x() - applePixmap.width() / 2;
+                int ay = calTarget.y() - applePixmap.height() / 2;
+                painter.drawPixmap(ax, ay, applePixmap);
+            } else {
+                painter.setPen(QPen(Qt::red, 3));
+                painter.setBrush(QColor(200, 40, 40, 120));
+                painter.drawEllipse(calTarget, 30, 30);
+            }
+            // 조준선 없음 (영점 전)
+        } else {
+            // Phase 1: 3박스 타겟 연습
+            painter.setFont(subFont);
+            painter.setPen(QColor(180, 180, 180));
+            painter.drawText(rect().adjusted(0, -60, 0, 0), Qt::AlignCenter,
+                             "Shoot all 3 targets to start the mission!");
 
-        // 에임 표시
-        painter.setPen(QPen(Qt::green, 3));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(aimPos, aimRadius, aimRadius);
-        painter.drawLine(aimPos.x() - 30, aimPos.y(), aimPos.x() + 30, aimPos.y());
-        painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
+            int boxW = 70, boxH = 50;
+            int by = height() - 180;
+            QRect calBoxes[3] = {
+                QRect(width() / 4 - boxW / 2, by, boxW, boxH),
+                QRect(width() / 2 - boxW / 2, by, boxW, boxH),
+                QRect(3 * width() / 4 - boxW / 2, by, boxW, boxH),
+            };
+
+            for (int i = 0; i < 3; i++) {
+                if (!calBoxHit[i]) {
+                    painter.setPen(QPen(Qt::red, 3));
+                    painter.setBrush(QColor(200, 40, 40, 120));
+                    painter.drawRect(calBoxes[i]);
+                    if (!applePixmap.isNull()) {
+                        int ax = calBoxes[i].center().x() - applePixmap.width() / 2;
+                        int ay = calBoxes[i].center().y() - applePixmap.height() / 2;
+                        painter.drawPixmap(ax, ay, applePixmap);
+                    }
+                } else {
+                    painter.setPen(QPen(QColor(80, 200, 80), 3));
+                    painter.setBrush(QColor(80, 200, 80, 40));
+                    painter.drawRect(calBoxes[i]);
+                    painter.setFont(QFont("Arial", 24, QFont::Bold));
+                    painter.setPen(QColor(80, 200, 80));
+                    painter.drawText(calBoxes[i], Qt::AlignCenter, "✓");
+                }
+            }
+
+            // 에임 표시 (영점 완료 후 보임)
+            painter.setPen(QPen(Qt::green, 3));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(aimPos, aimRadius, aimRadius);
+            painter.drawLine(aimPos.x() - 30, aimPos.y(), aimPos.x() + 30, aimPos.y());
+            painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
+        }
         return;
     }
 
@@ -527,6 +615,20 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
 void MainWindow::gameLoop()
 {
+    if (gameState == HowToPlay) {
+        howToPlayTimerMs -= 30;
+        if (howToPlayTimerMs <= 0) {
+            if (howToPlayPage == 0) {
+                howToPlayPage = 1;
+                howToPlayTimerMs = 3000;
+            } else {
+                showBriefing();
+            }
+        }
+        update();
+        return;
+    }
+
     if (gameState != Playing) {
         fireEffect = false;
         update();
@@ -602,6 +704,15 @@ void MainWindow::startGame()
     enterCalibration();
 }
 
+void MainWindow::showHowToPlay()
+{
+    gameState = HowToPlay;
+    howToPlayPage = 0;
+    howToPlayTimerMs = 3000;
+    updateButtonLayout();
+    update();
+}
+
 void MainWindow::showBriefing()
 {
     gameState = Briefing;
@@ -620,7 +731,9 @@ void MainWindow::startPlaying()
 void MainWindow::enterCalibration()
 {
     gameState = Calibrating;
-    aimPos = QPoint(width() / 2, height() / 2); // 에임을 화면 중앙에서 시작
+    calPhase = 0;
+    aimPos = QPoint(width() / 2, height() / 2);
+    calBoxHit[0] = calBoxHit[1] = calBoxHit[2] = false;
     updateButtonLayout();
     update();
 }
@@ -628,8 +741,33 @@ void MainWindow::enterCalibration()
 void MainWindow::fire()
 {
     if (gameState == Calibrating) {
-        centerPos = aimPos;
-        showBriefing();
+        fireEffect = true;
+
+        if (calPhase == 0) {
+            // 영점 조절: 현재 aimPos를 centerPos로 저장, 조준선을 화면 중앙으로
+            centerPos = aimPos;
+            aimPos = QPoint(width() / 2, height() / 2);
+            calPhase = 1;
+        } else {
+            // 3박스 타겟 히트 체크
+            int boxW = 70, boxH = 50;
+            int by = height() - 180;
+            QRect calBoxes[3] = {
+                QRect(width() / 4 - boxW / 2, by, boxW, boxH),
+                QRect(width() / 2 - boxW / 2, by, boxW, boxH),
+                QRect(3 * width() / 4 - boxW / 2, by, boxW, boxH),
+            };
+            for (int i = 0; i < 3; i++) {
+                if (!calBoxHit[i] && calBoxes[i].contains(aimPos)) {
+                    calBoxHit[i] = true;
+                    break;
+                }
+            }
+            if (calBoxHit[0] && calBoxHit[1] && calBoxHit[2]) {
+                showHowToPlay();
+            }
+        }
+        update();
         return;
     }
     if (gameState != Playing) return;
@@ -702,7 +840,7 @@ void MainWindow::clampAim()
 void MainWindow::resetGame()
 {
     score = 0;
-    remainingTimeMs = 60000;
+    remainingTimeMs = 30000;
     fireEffect = false;
     hitEffect = false;
     hitEffectFrames = 0;

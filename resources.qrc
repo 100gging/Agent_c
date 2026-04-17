@@ -13,5 +13,8 @@
         <file>images/tree.png</file>
         <file>images/bush.png</file>
         <file>images/leaf.png</file>
+        <file>images/background_game.png</file>
+        <file>images/how_to_play1.png</file>
+        <file>images/how_to_play2.png</file>
     </qresource>
 </RCC>
