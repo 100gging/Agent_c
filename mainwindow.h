@@ -1,0 +1,113 @@
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
+#include <QMainWindow>
+#include <QPoint>
+#include <QTimer>
+#include <QPushButton>
+#include <QPixmap>
+#include <QImage>
+#include <QVector>
+#include <QMap>
+#include <QString>
+
+struct Target {
+    QPoint pos;
+    int    speedX;
+    int    speedY;
+    int    radius;   // 기본 30을 1로 기준
+    int    points;   // 양수: 적군, 음수: 아군
+    bool   isEnemy;
+    QString typeName; // 플리짐 key
+};
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+
+public:
+    enum GameState { Menu, Calibrating, Briefing, Playing, GameOver };
+
+    MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+
+private slots:
+    void gameLoop();
+    void moveLeft();
+    void moveRight();
+    void moveUp();
+    void moveDown();
+    void fire();
+    void startGame();
+    void enterCalibration();
+    void showBriefing();
+    void startPlaying();
+    void retryGame();
+    void goToMainMenu();
+
+private:
+    bool    isBlockedByWall(QPoint from, QPoint to);
+    bool    lineHitsWallMask(QPoint from, QPoint to) const;
+    bool    pointHitsOpaquePixel(const QImage &img, const QRect &dstRect, const QPoint &p) const;
+    bool    pointHitsTarget(const Target &t, const QPoint &p) const;
+    Target  spawnEnemy();
+    Target  spawnAlly();
+    QPoint  randomPos();
+    void    setupUiButtons();
+    void    updateButtonLayout();
+    void    clampAim();
+    void    resetTargets();
+    void    resetGame();
+
+private:
+    QTimer *timer;
+    GameState gameState;
+
+    QPoint aimPos;
+    QPoint centerPos;
+
+    int aimStep;
+    int aimRadius;
+
+    // 타겟 리스트 (1개 적군 + 1개 아군)
+    QVector<Target> targets;
+
+    // 프리로드된 모든 픽스맵
+    QMap<QString, QPixmap> pixmaps;
+    QMap<QString, QImage> spriteMasks;
+    QPixmap backgroundPixmap;
+    QPixmap treePixmap;
+    QPixmap bushPixmap;
+    QPixmap leafPixmap;
+    QImage treeMaskImage;
+    QImage bushMaskImage;
+    QImage leafMaskImage;
+
+    QRect treeRect;
+    QRect bushRect;
+    QRect leafRect;
+
+    int score;
+    int remainingTimeMs;
+
+    bool fireEffect;
+    bool hitEffect;
+    int  hitEffectFrames;
+    bool lastHitWasEnemy;
+
+    QPushButton *btnUp;
+    QPushButton *btnDown;
+    QPushButton *btnLeft;
+    QPushButton *btnRight;
+    QPushButton *btnFire;
+    QPushButton *btnStart;
+    QPushButton *btnNext;
+    QPushButton *btnRetry;
+    QPushButton *btnMainMenu;
+};
+
+#endif // MAINWINDOW_H
