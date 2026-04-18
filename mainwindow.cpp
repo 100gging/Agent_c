@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include <QPainter>
+#include <QApplication>
 #include <QRandomGenerator>
 #include <QResizeEvent>
 #include <QFont>
@@ -48,15 +49,11 @@ MainWindow::MainWindow(QWidget *parent)
       hitEffect(false),
       hitEffectFrames(0),
       lastHitWasEnemy(false),
-      btnUp(nullptr),
-      btnDown(nullptr),
-      btnLeft(nullptr),
-      btnRight(nullptr),
-      btnFire(nullptr),
       btnStart(nullptr),
       btnNext(nullptr),
       btnRetry(nullptr),
-      btnMainMenu(nullptr)
+      btnMainMenu(nullptr),
+      m_gpioBtn(new GpioButton(4, this))
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -141,6 +138,13 @@ MainWindow::MainWindow(QWidget *parent)
     resetTargets();
     connect(timer, &QTimer::timeout, this, &MainWindow::gameLoop);
     timer->start(30);
+
+    /* 자이로 센서 화면 크기 설정 */
+    m_sensor.setScreenSize(1024, 600);
+
+    /* GPIO 버튼 연결 (BCM4) */
+    connect(m_gpioBtn, &GpioButton::pressed, this, &MainWindow::onGpioPressed);
+    m_gpioBtn->start(50);
 }
 
 MainWindow::~MainWindow()
@@ -149,11 +153,6 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupUiButtons()
 {
-    btnUp = new QPushButton("UP", this);
-    btnDown = new QPushButton("DOWN", this);
-    btnLeft = new QPushButton("LEFT", this);
-    btnRight = new QPushButton("RIGHT", this);
-    btnFire = new QPushButton("FIRE", this);
     btnStart = new QPushButton("GAME START", this);
     btnNext = new QPushButton("START MISSION", this);
     btnRetry = new QPushButton("RETRY", this);
@@ -201,27 +200,16 @@ void MainWindow::setupUiButtons()
         "  color: black;"
         "}";
 
-    btnUp->setStyleSheet(commonStyle);
-    btnDown->setStyleSheet(commonStyle);
-    btnLeft->setStyleSheet(commonStyle);
-    btnRight->setStyleSheet(commonStyle);
     btnRetry->setStyleSheet(commonStyle);
     btnMainMenu->setStyleSheet(commonStyle);
     btnNext->setStyleSheet(commonStyle);
-    btnFire->setStyleSheet(fireStyle);
     btnStart->setStyleSheet(startStyle);
 
-    for (QPushButton *btn : {btnUp, btnDown, btnLeft, btnRight, btnFire,
-                              btnStart, btnNext, btnRetry, btnMainMenu}) {
+    for (QPushButton *btn : {btnStart, btnNext, btnRetry, btnMainMenu}) {
         btn->setFocusPolicy(Qt::NoFocus);
         btn->setAutoRepeat(false);
     }
 
-    connect(btnUp,       &QPushButton::pressed, this, &MainWindow::moveUp);
-    connect(btnDown,     &QPushButton::pressed, this, &MainWindow::moveDown);
-    connect(btnLeft,     &QPushButton::pressed, this, &MainWindow::moveLeft);
-    connect(btnRight,    &QPushButton::pressed, this, &MainWindow::moveRight);
-    connect(btnFire,     &QPushButton::pressed, this, &MainWindow::fire);
     connect(btnStart,    &QPushButton::pressed, this, &MainWindow::startGame);
     connect(btnNext,     &QPushButton::pressed, this, &MainWindow::startPlaying);
     connect(btnRetry,    &QPushButton::pressed, this, &MainWindow::retryGame);
@@ -369,25 +357,12 @@ bool MainWindow::pointHitsTarget(const Target &t, const QPoint &p) const
 void MainWindow::updateButtonLayout()
 {
     // 버튼이 아직 생성되지 않은 경우 무시
-    if (!btnUp) return;
+    if (!btnStart) return;
 
     int w = width();
     int h = height();
 
-    int btnW = 110;
-    int btnH = 70;
-
-    // 방향 버튼
-    int baseX = 40;
-    int baseY = h - 220;
-
-    btnUp->setGeometry(baseX + btnW, baseY, btnW, btnH);
-    btnLeft->setGeometry(baseX, baseY + btnH + 10, btnW, btnH);
-    btnRight->setGeometry(baseX + btnW * 2, baseY + btnH + 10, btnW, btnH);
-    btnDown->setGeometry(baseX + btnW, baseY + (btnH + 10) * 2, btnW, btnH);
-
     // 기능 버튼
-    btnFire->setGeometry(w - 220, h - 180, 180, 120);
 
     // Result 버튼
     btnRetry->setGeometry(w / 2 - 220, h / 2 + 80, 200, 70);
@@ -400,33 +375,14 @@ void MainWindow::updateButtonLayout()
     btnNext->setGeometry(w / 2 - 140, h - 90, 280, 70);
 
     // 상태에 따라 버튼 표시/숨김
-    bool isPlaying    = (gameState == Playing);
     bool isMenu       = (gameState == Menu);
-    bool isCal        = (gameState == Calibrating);
-    bool isHowTo      = (gameState == HowToPlay);
-    bool isCountdown  = (gameState == Countdown);
     bool isBriefing   = (gameState == Briefing);
     bool isGameOver   = (gameState == GameOver);
 
-    btnUp->setVisible(isPlaying || isCal);
-    btnDown->setVisible(isPlaying || isCal);
-    btnLeft->setVisible(isPlaying || isCal);
-    btnRight->setVisible(isPlaying || isCal);
-    btnFire->setVisible(isPlaying || isCal);
     btnStart->setVisible(isMenu);
     btnNext->setVisible(isBriefing);
     btnRetry->setVisible(isGameOver);
     btnMainMenu->setVisible(isGameOver);
-
-    // HowToPlay / Countdown 상태에서는 모든 버튼 숨김
-    if (isHowTo || isCountdown) {
-        btnUp->setVisible(false);
-        btnDown->setVisible(false);
-        btnLeft->setVisible(false);
-        btnRight->setVisible(false);
-        btnFire->setVisible(false);
-        btnNext->setVisible(false);
-    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)
@@ -472,7 +428,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.setFont(subFont);
         painter.setPen(QColor(180, 180, 180));
         painter.drawText(rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
-                         "Press GAME START to begin");
+                         "Press BUTTON to begin");
         return;
     }
 
@@ -743,6 +699,13 @@ void MainWindow::gameLoop()
     }
 
     if (gameState != Playing) {
+        if (gameState == Calibrating && calPhase == 1) {
+            /* 캘리브레이션 Phase 1: 센서로 에임 이동 */
+            m_sensor.update();
+            aimPos.setX(m_sensor.aimX());
+            aimPos.setY(m_sensor.aimY());
+            clampAim();
+        }
         fireEffect = false;
         update();
         return;
@@ -754,6 +717,12 @@ void MainWindow::gameLoop()
         gameState = GameOver;
         updateButtonLayout();
     }
+
+    /* 자이로 센서로 에임 이동 */
+    m_sensor.update();
+    aimPos.setX(m_sensor.aimX());
+    aimPos.setY(m_sensor.aimY());
+    clampAim();
 
     // 각 타겟 이동
     int margin = 120;
@@ -799,36 +768,41 @@ void MainWindow::gameLoop()
     update();
 }
 
-void MainWindow::moveLeft()
+/* ================================================================
+   GPIO 버튼 (BCM4) 눌림 처리
+   상태에 따라 다른 동작:
+   - Menu → 게임 시작 (startGame)
+   - Calibrating → fire (영점/타겟)
+   - Briefing → startPlaying
+   - Playing → fire (총 발사)
+   - GameOver → retryGame
+   ================================================================ */
+void MainWindow::onGpioPressed()
 {
-    if (gameState != Playing && gameState != Calibrating) return;
-    aimPos.rx() -= aimStep;
-    clampAim();
-    //update();
-}
-
-void MainWindow::moveRight()
-{
-    if (gameState != Playing && gameState != Calibrating) return;
-    aimPos.rx() += aimStep;
-    clampAim();
-    //update();
-}
-
-void MainWindow::moveUp()
-{
-    if (gameState != Playing && gameState != Calibrating) return;
-    aimPos.ry() -= aimStep;
-    clampAim();
-    //update();
-}
-
-void MainWindow::moveDown()
-{
-    if (gameState != Playing && gameState != Calibrating) return;
-    aimPos.ry() += aimStep;
-    clampAim();
-    //update();
+    switch (gameState) {
+    case Menu:
+        startGame();
+        break;
+    case GyroCalibrating:
+        /* 자이로 보정 중에는 무시 */
+        break;
+    case Calibrating:
+        fire();
+        break;
+    case HowToPlay:
+    case Countdown:
+        /* 진행 중 무시 */
+        break;
+    case Briefing:
+        startPlaying();
+        break;
+    case Playing:
+        fire();
+        break;
+    case GameOver:
+        retryGame();
+        break;
+    }
 }
 
 void MainWindow::startGame()
@@ -870,6 +844,17 @@ void MainWindow::showCountdown()
 
 void MainWindow::enterCalibration()
 {
+    /* 자이로 센서 초기화 + 보정 */
+    gameState = GyroCalibrating;
+    updateButtonLayout();
+    update();
+    QApplication::processEvents();
+
+    if (m_sensor.init()) {
+        m_sensor.calibrateGyroOffset(500);
+        m_sensor.calibrateCenter(200);
+    }
+
     gameState = Calibrating;
     calPhase = 0;
     aimPos = QPoint(width() / 2, height() / 2);

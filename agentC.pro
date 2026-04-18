@@ -10,10 +10,14 @@ CONFIG += c++11
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    mpu6050sensor.cpp \
+    gpiobutton.cpp
 
 HEADERS += \
-    mainwindow.h
+    mainwindow.h \
+    mpu6050sensor.h \
+    gpiobutton.h
 
 RESOURCES += resources.qrc
 

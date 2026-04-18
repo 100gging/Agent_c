@@ -11,6 +11,8 @@
 #include <QMap>
 #include <QString>
 #include <QElapsedTimer>
+#include "mpu6050sensor.h"
+#include "gpiobutton.h"
 
 struct Target {
     QPoint pos;
@@ -28,7 +30,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, Calibrating, HowToPlay, Briefing, Countdown, Playing, GameOver };
+    enum GameState { Menu, GyroCalibrating, Calibrating, HowToPlay, Briefing, Countdown, Playing, GameOver };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -39,11 +41,8 @@ protected:
 
 private slots:
     void gameLoop();
-    void moveLeft();
-    void moveRight();
-    void moveUp();
-    void moveDown();
     void fire();
+    void onGpioPressed();
     void startGame();
     void enterCalibration();
     void showBriefing();
@@ -126,15 +125,13 @@ private:
     bool calBoxHit[3];
     int  calPhase;     // 0: 영점(사과), 1: 3박스 타겟
 
-    QPushButton *btnUp;
-    QPushButton *btnDown;
-    QPushButton *btnLeft;
-    QPushButton *btnRight;
-    QPushButton *btnFire;
     QPushButton *btnStart;
     QPushButton *btnNext;
     QPushButton *btnRetry;
     QPushButton *btnMainMenu;
+
+    MPU6050Sensor m_sensor;
+    GpioButton   *m_gpioBtn;
 };
 
 #endif // MAINWINDOW_H
