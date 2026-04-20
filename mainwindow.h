@@ -31,7 +31,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, GyroCalibrating, Calibrating, HowToPlay, Briefing, Countdown, Playing, GameOver };
+    enum GameState { Menu, GyroCalibrating, Calibrating, HowToPlay, Briefing, Countdown, Playing, GameOver, Settings };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -44,6 +44,8 @@ private slots:
     void gameLoop();
     void fire();
     void onGpioPressed();
+    void onSw2Pressed();
+    void onSw3Pressed();
     void startGame();
     void enterCalibration();
     void showBriefing();
@@ -132,7 +134,15 @@ private:
     QPushButton *btnMainMenu;
 
     MPU6050Sensor m_sensor;
-    GpioButton   *m_gpioBtn;
+    GpioButton   *m_gpioBtn;   // BCM4: 발사/선택
+    GpioButton   *m_sw2Btn;    // BCM17: 아래
+    GpioButton   *m_sw3Btn;    // BCM18: 위/설정진입
+
+    // 환경설정
+    int  settingsCursor;       // 0: BGM, 1: SFX, 2: 나가기
+    int  settingsBgmVol;       // 0,25,50,75,100
+    int  settingsSfxVol;       // 0,25,50,75,100
+    GameState prevState;       // 설정 진입 전 상태
 
     // 사운드 (ALSA)
     AlsaPlayer *m_audio;

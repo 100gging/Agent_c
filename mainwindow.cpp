@@ -53,7 +53,13 @@ MainWindow::MainWindow(QWidget *parent)
       btnNext(nullptr),
       btnRetry(nullptr),
       btnMainMenu(nullptr),
-      m_gpioBtn(new GpioButton(4, this))
+      m_gpioBtn(new GpioButton(4, this)),
+      m_sw2Btn(new GpioButton(17, this)),
+      m_sw3Btn(new GpioButton(18, this)),
+      settingsCursor(0),
+      settingsBgmVol(50),
+      settingsSfxVol(100),
+      prevState(Menu)
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -156,6 +162,14 @@ MainWindow::MainWindow(QWidget *parent)
     /* GPIO 버튼 연결 (BCM4) */
     connect(m_gpioBtn, &GpioButton::pressed, this, &MainWindow::onGpioPressed);
     m_gpioBtn->start(50);
+
+    /* SW2 (BCM17): 아래 */
+    connect(m_sw2Btn, &GpioButton::pressed, this, &MainWindow::onSw2Pressed);
+    m_sw2Btn->start(50);
+
+    /* SW3 (BCM18): 위/설정진입 */
+    connect(m_sw3Btn, &GpioButton::pressed, this, &MainWindow::onSw3Pressed);
+    m_sw3Btn->start(50);
 }
 
 MainWindow::~MainWindow()
@@ -440,6 +454,50 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.setPen(QColor(180, 180, 180));
         painter.drawText(rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
                          "Press BUTTON to begin");
+        return;
+    }
+
+    if (gameState == Settings) {
+        // 환경설정 화면 - 어두운 배경
+        painter.fillRect(rect(), QColor(15, 15, 15));
+
+        painter.setFont(bigFont);
+        painter.setPen(QColor(220, 220, 220));
+        painter.drawText(rect().adjusted(0, -200, 0, 0), Qt::AlignCenter, "SETTINGS");
+
+        QFont itemFont("Arial", 24, QFont::Bold);
+        painter.setFont(itemFont);
+
+        int startY = height() / 2 - 60;
+        int lineH = 70;
+
+        QString items[3] = {
+            QString("BGM Volume: %1").arg(settingsBgmVol),
+            QString("SFX Volume: %1").arg(settingsSfxVol),
+            QString("EXIT")
+        };
+
+        for (int i = 0; i < 3; i++) {
+            QRect itemRect(width() / 2 - 200, startY + i * lineH, 400, 50);
+
+            if (i == settingsCursor) {
+                // 선택된 항목: 하이라이트
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(60, 160, 60, 150));
+                painter.drawRoundedRect(itemRect, 10, 10);
+                painter.setPen(QColor(100, 255, 100));
+                painter.drawText(itemRect, Qt::AlignCenter, QString("> %1 <").arg(items[i]));
+            } else {
+                painter.setPen(QColor(180, 180, 180));
+                painter.drawText(itemRect, Qt::AlignCenter, items[i]);
+            }
+        }
+
+        // 하단 안내
+        painter.setFont(QFont("Arial", 14));
+        painter.setPen(QColor(120, 120, 120));
+        painter.drawText(rect().adjusted(0, 270, 0, 0), Qt::AlignCenter,
+                         "SW2: DOWN  |  SW3: UP  |  FIRE: SELECT");
         return;
     }
 
@@ -788,6 +846,23 @@ void MainWindow::gameLoop()
 void MainWindow::onGpioPressed()
 {
     switch (gameState) {
+    case Settings:
+        // 설정 창에서 BCM4 = 선택
+        if (settingsCursor == 0) {
+            // BGM 볼륨 변경: 0→25→50→75→100→0
+            settingsBgmVol = (settingsBgmVol >= 100) ? 0 : settingsBgmVol + 25;
+            m_audio->setBgmVolume(settingsBgmVol);
+        } else if (settingsCursor == 1) {
+            // SFX 볼륨 변경: 0→25→50→75→100→0
+            settingsSfxVol = (settingsSfxVol >= 100) ? 0 : settingsSfxVol + 25;
+            m_audio->setSfxVolume(settingsSfxVol);
+        } else {
+            // 나가기
+            gameState = prevState;
+            updateButtonLayout();
+        }
+        update();
+        break;
     case Menu:
         startGame();
         break;
@@ -810,6 +885,33 @@ void MainWindow::onGpioPressed()
     case GameOver:
         retryGame();
         break;
+    }
+}
+
+/* SW2 (BCM17): 설정 창에서 아래로 */
+void MainWindow::onSw2Pressed()
+{
+    if (gameState == Settings) {
+        settingsCursor++;
+        if (settingsCursor > 2) settingsCursor = 0;
+        update();
+    }
+}
+
+/* SW3 (BCM18): 설정 창 진입 / 설정 창에서 위로 */
+void MainWindow::onSw3Pressed()
+{
+    if (gameState == Settings) {
+        settingsCursor--;
+        if (settingsCursor < 0) settingsCursor = 2;
+        update();
+    } else if (gameState == Menu) {
+        // 메뉴에서 SW3 누르면 설정 진입
+        prevState = gameState;
+        settingsCursor = 0;
+        gameState = Settings;
+        updateButtonLayout();
+        update();
     }
 }
 
