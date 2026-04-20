@@ -136,6 +136,13 @@ MainWindow::MainWindow(QWidget *parent)
 
     setupUiButtons();
     resetTargets();
+
+    // ALSA 사운드 초기화
+    m_audio = new AlsaPlayer(this);
+    m_audio->loadSfx("fire", "sounds/fire.wav");
+    m_audio->loadBgm("sounds/butterfly.wav");
+    m_audio->playBgm();
+
     connect(timer, &QTimer::timeout, this, &MainWindow::gameLoop);
     timer->start(30);
 
@@ -808,6 +815,7 @@ void MainWindow::onGpioPressed()
 void MainWindow::startGame()
 {
     // START 버튼 누르면 캘리브레이션으로
+    m_audio->stopBgm();
     enterCalibration();
 }
 
@@ -867,6 +875,7 @@ void MainWindow::fire()
 {
     if (gameState == Calibrating) {
         fireEffect = true;
+        m_audio->playSfx("fire");
 
         if (calPhase == 0) {
             // 영점 조절: 현재 aimPos를 centerPos로 저장, 조준선을 화면 중앙으로
@@ -898,6 +907,7 @@ void MainWindow::fire()
     if (gameState != Playing) return;
 
     fireEffect = true;
+    m_audio->playSfx("fire");
 
     static const QPoint hitProbeOffsets[] = {
         QPoint(0, 0),
@@ -945,6 +955,7 @@ void MainWindow::goToMainMenu()
     gameState = Menu;
     centerPos = QPoint(width() / 2, height() / 2);
     aimPos = centerPos;
+    m_audio->playBgm();
     updateButtonLayout();
     update();
 }

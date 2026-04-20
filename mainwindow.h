@@ -11,6 +11,7 @@
 #include <QMap>
 #include <QString>
 #include <QElapsedTimer>
+#include "alsaplayer.h"
 #include "mpu6050sensor.h"
 #include "gpiobutton.h"
 
@@ -132,6 +133,9 @@ private:
 
     MPU6050Sensor m_sensor;
     GpioButton   *m_gpioBtn;
+
+    // 사운드 (ALSA)
+    AlsaPlayer *m_audio;
 };
 
 #endif // MAINWINDOW_H
