@@ -227,9 +227,13 @@ bool AlsaPlayer::loadSfx(const QString &name, const QString &filePath)
     return true;
 }
 
-bool AlsaPlayer::loadBgm(const QString &filePath)
+bool AlsaPlayer::loadBgm(const QString &name, const QString &filePath)
 {
-    return loadWav(filePath, m_bgmData);
+    WavData wav;
+    if (!loadWav(filePath, wav))
+        return false;
+    m_bgmMap[name] = wav;
+    return true;
 }
 
 void AlsaPlayer::playSfx(const QString &name)
@@ -240,12 +244,12 @@ void AlsaPlayer::playSfx(const QString &name)
     t->start();
 }
 
-void AlsaPlayer::playBgm()
+void AlsaPlayer::playBgm(const QString &name)
 {
-    if (m_bgmData.pcmData.isEmpty()) return;
+    if (!m_bgmMap.contains(name)) return;
     stopBgm();
     m_bgmThread = new BgmThread(this);
-    m_bgmThread->setWavData(m_bgmData);
+    m_bgmThread->setWavData(m_bgmMap[name]);
     m_bgmThread->setVolume(m_bgmVolume);
     m_bgmThread->start();
 }

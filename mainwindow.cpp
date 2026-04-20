@@ -140,8 +140,9 @@ MainWindow::MainWindow(QWidget *parent)
     // ALSA 사운드 초기화
     m_audio = new AlsaPlayer(this);
     m_audio->loadSfx("fire", "sounds/fire.wav");
-    m_audio->loadBgm("sounds/butterfly.wav");
-    m_audio->playBgm();
+    m_audio->loadBgm("menu", "sounds/butterfly.wav");
+    m_audio->loadBgm("game", "sounds/gamebgm.wav");
+    m_audio->playBgm("menu");
 
     connect(timer, &QTimer::timeout, this, &MainWindow::gameLoop);
     timer->start(30);
@@ -698,6 +699,7 @@ void MainWindow::gameLoop()
                 resetGame();
                 gameState = Playing;
                 gameElapsed.start();
+                m_audio->playBgm("game");
                 updateButtonLayout();
             }
         }
@@ -722,6 +724,7 @@ void MainWindow::gameLoop()
     if (remainingMs <= 0) {
         remainingMs = 0;
         gameState = GameOver;
+        m_audio->stopBgm();
         updateButtonLayout();
     }
 
@@ -955,7 +958,7 @@ void MainWindow::goToMainMenu()
     gameState = Menu;
     centerPos = QPoint(width() / 2, height() / 2);
     aimPos = centerPos;
-    m_audio->playBgm();
+    m_audio->playBgm("menu");
     updateButtonLayout();
     update();
 }
