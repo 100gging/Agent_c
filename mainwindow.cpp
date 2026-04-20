@@ -654,11 +654,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
                          lastHitWasEnemy ? "+HIT!" : "-ALLY!");
     }
 
-    // 중앙 기준점
-    painter.setPen(QPen(QColor(100, 100, 255), 2, Qt::DashLine));
-    painter.drawLine(centerPos.x() - 15, centerPos.y(), centerPos.x() + 15, centerPos.y());
-    painter.drawLine(centerPos.x(), centerPos.y() - 15, centerPos.x(), centerPos.y() + 15);
-
     // 게임 종료 화면
     if (gameState == GameOver) {
         painter.fillRect(rect(), QColor(0, 0, 0, 180));
