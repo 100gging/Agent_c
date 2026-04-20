@@ -140,6 +140,8 @@ MainWindow::MainWindow(QWidget *parent)
     // ALSA 사운드 초기화
     m_audio = new AlsaPlayer(this);
     m_audio->loadSfx("fire", "sounds/fire.wav");
+    m_audio->loadSfx("enemy_dead", "sounds/enemy_dead.wav");
+    m_audio->loadSfx("ally_dead", "sounds/ally_dead.wav");
     m_audio->loadBgm("menu", "sounds/butterfly.wav");
     m_audio->loadBgm("game", "sounds/gamebgm.wav");
     m_audio->playBgm("menu");
@@ -935,6 +937,10 @@ void MainWindow::fire()
             lastHitWasEnemy = t.isEnemy;
             hitEffect = true;
             hitEffectFrames = 12;
+            if (t.isEnemy)
+                m_audio->playSfx("enemy_dead");
+            else
+                m_audio->playSfx("ally_dead");
             // 해당 타겟을 같은 타입으로 리스폰
             if (t.isEnemy)
                 targets[i] = spawnEnemy();
