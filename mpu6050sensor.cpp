@@ -212,6 +212,14 @@ void MPU6050Sensor::calibrateCenter(int samples)
     m_calibrated  = true;
 }
 
+/* ─── 영점 즉시 재설정 ─── */
+
+void MPU6050Sensor::rezero()
+{
+    m_basePitch = m_filteredPitch;
+    m_baseRoll  = m_filteredRoll;
+}
+
 /* ─── 매 프레임 업데이트 ─── */
 
 void MPU6050Sensor::update()
@@ -262,9 +270,7 @@ void MPU6050Sensor::update()
     double deltaPitch = m_deltaPitch;
     double deltaRoll  = m_deltaRoll;
 
-    /* 5) 데드존 처리 — 손떨림 무시 */
-    if (fabs(deltaPitch) < m_deadzoneDeg) deltaPitch = 0.0;
-    if (fabs(deltaRoll)  < m_deadzoneDeg) deltaRoll  = 0.0;
+    /* 5) 데드존 제거 — 원시 값 그대로 사용 */
 
     /* 6) 화면 좌표 변환
        roll  → 좌우 이동

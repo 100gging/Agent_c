@@ -32,6 +32,9 @@ public:
     /* 중앙 기준값 보정 — 정조준 상태에서 호출해야 함 */
     void calibrateCenter(int samples = 200);
 
+    /* 영점 재설정 — 현재 자세를 화면 중앙으로 즉시 설정 */
+    void rezero();
+
     /* 센서 읽기 + 필터 적용 + 에임 좌표 계산 (매 프레임 호출) */
     void update();
 

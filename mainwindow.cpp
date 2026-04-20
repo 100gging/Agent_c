@@ -57,6 +57,7 @@ MainWindow::MainWindow(QWidget *parent)
       m_gpioBtn(new GpioButton(4, this)),
       m_sw2Btn(new GpioButton(17, this)),
       m_sw3Btn(new GpioButton(18, this)),
+      gameOverCursor(0),
       settingsCursor(0),
       settingsBgmVol(100),
       settingsSfxVol(100),
@@ -150,7 +151,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_audio->loadSfx("fire", "sounds/fire.wav", 150);
     m_audio->loadSfx("enemy_dead", "sounds/enemy_dead.wav");
     m_audio->loadSfx("ally_dead", "sounds/ally_dead.wav");
-    m_audio->loadBgm("menu", "sounds/butterfly.wav", 50);
+    m_audio->loadBgm("menu", "sounds/butterfly.wav");
     m_audio->setBgmVolume(100);
     m_audio->loadBgm("game", "sounds/gamebgm.wav");
     m_audio->playBgm("menu");
@@ -437,6 +438,17 @@ void MainWindow::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
+    // 외곽선 텍스트 헬퍼: 흰 외곽선 + 검정 본문
+    auto drawOutlinedText = [&](const QRect &rect, int flags, const QString &text) {
+        painter.setPen(QColor(255, 255, 255, 180));
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+                if (dx || dy)
+                    painter.drawText(rect.adjusted(dx, dy, dx, dy), flags, text);
+        painter.setPen(Qt::black);
+        painter.drawText(rect, flags, text);
+    };
+
     // 배경
     if (!backgroundPixmap.isNull())
         painter.drawPixmap(rect(), backgroundPixmap);
@@ -453,9 +465,13 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.drawText(rect().adjusted(0, -80, 0, 0), Qt::AlignCenter, "AGENT C");
 
         painter.setFont(subFont);
-        painter.setPen(QColor(180, 180, 180));
-        painter.drawText(rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
+        drawOutlinedText(rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
                          "Press BUTTON to begin");
+
+        painter.setFont(QFont("Arial", 13));
+        drawOutlinedText(QRect(0, height() - 160, width(), 60), Qt::AlignCenter,
+                         "After pressing, hold the gun still and aim at the screen center.\n"
+                         "The sensor will calibrate automatically. (~5 sec)");
         return;
     }
 
@@ -472,16 +488,17 @@ void MainWindow::paintEvent(QPaintEvent *event)
         QFont itemFont("Arial", 24, QFont::Bold);
         painter.setFont(itemFont);
 
-        int startY = height() / 2 - 60;
+        int startY = height() / 2 - 90;
         int lineH = 70;
 
-        QString items[3] = {
+        QString items[4] = {
             QString("BGM Volume: %1").arg(settingsBgmVol),
             QString("SFX Volume: %1").arg(settingsSfxVol),
+            QString("RECALIBRATE"),
             QString("EXIT")
         };
 
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             QRect itemRect(width() / 2 - 200, startY + i * lineH, 400, 50);
 
             if (i == settingsCursor) {
@@ -499,8 +516,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
         // 하단 안내
         painter.setFont(QFont("Arial", 14));
-        painter.setPen(QColor(120, 120, 120));
-        painter.drawText(rect().adjusted(0, 270, 0, 0), Qt::AlignCenter,
+        drawOutlinedText(rect().adjusted(0, 270, 0, 0), Qt::AlignCenter,
                          "SW2: DOWN  |  SW3: UP  |  FIRE: SELECT");
         return;
     }
@@ -566,13 +582,12 @@ void MainWindow::paintEvent(QPaintEvent *event)
         // 캘리브레이션 화면
         painter.setFont(bigFont);
         painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -140, 0, 0), Qt::AlignCenter, "CALIBRATION");
+        painter.drawText(rect().adjusted(0, -80, 0, 0), Qt::AlignCenter, "CALIBRATION");
 
         if (calPhase == 0) {
             // Phase 0: 영점 조절 — 사과만 보이고 조준선 없음
             painter.setFont(subFont);
-            painter.setPen(QColor(180, 180, 180));
-            painter.drawText(rect().adjusted(0, -60, 0, 0), Qt::AlignCenter,
+            drawOutlinedText(rect().adjusted(0, 60, 0, 0), Qt::AlignCenter,
                              "Aim at the apple and press FIRE to zero in");
 
             QPoint calTarget(width() / 2, height() / 2);
@@ -589,16 +604,14 @@ void MainWindow::paintEvent(QPaintEvent *event)
         } else {
             // Phase 1: 3박스 타겟 연습
             painter.setFont(subFont);
-            painter.setPen(QColor(180, 180, 180));
-            painter.drawText(rect().adjusted(0, -60, 0, 0), Qt::AlignCenter,
+            drawOutlinedText(rect().adjusted(0, 60, 0, 0), Qt::AlignCenter,
                              "Shoot all 3 targets to start the mission!");
 
             int boxW = 70, boxH = 50;
-            int by = height() - 180;
             QRect calBoxes[3] = {
-                QRect(width() / 4 - boxW / 2, by, boxW, boxH),
-                QRect(width() / 2 - boxW / 2, by, boxW, boxH),
-                QRect(3 * width() / 4 - boxW / 2, by, boxW, boxH),
+                QRect(width() / 4 - boxW / 2, height() - 180, boxW, boxH),
+                QRect(width() / 2 - boxW / 2, 120, boxW, boxH),
+                QRect(3 * width() / 4 - boxW / 2, height() - 180, boxW, boxH),
             };
 
             for (int i = 0; i < 3; i++) {
@@ -737,6 +750,29 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.setPen(QColor(255, 220, 50));
         painter.drawText(rect().adjusted(0, -20, 0, 0), Qt::AlignCenter,
                          QString("Final Score: %1").arg(score));
+
+        // GameOver 선택 커서 하이라이트
+        QPushButton *goButtons[2] = { btnRetry, btnMainMenu };
+        QString selStyle =
+            "QPushButton {"
+            "  background-color: rgba(60, 160, 60, 200);"
+            "  color: white;"
+            "  border: 3px solid #66ff66;"
+            "  border-radius: 12px;"
+            "  font-size: 20px;"
+            "  font-weight: bold;"
+            "}";
+        QString normStyle =
+            "QPushButton {"
+            "  background-color: rgba(80, 80, 80, 180);"
+            "  color: white;"
+            "  border: 2px solid white;"
+            "  border-radius: 12px;"
+            "  font-size: 20px;"
+            "  font-weight: bold;"
+            "}";
+        for (int i = 0; i < 2; i++)
+            goButtons[i]->setStyleSheet(i == gameOverCursor ? selStyle : normStyle);
     }
 }
 
@@ -793,6 +829,7 @@ void MainWindow::gameLoop()
     if (remainingMs <= 0) {
         remainingMs = 0;
         gameState = GameOver;
+        gameOverCursor = 0;
         m_audio->stopBgm();
         updateButtonLayout();
     }
@@ -869,6 +906,16 @@ void MainWindow::onGpioPressed()
             // SFX 볼륨 변경: 0→25→50→75→100→0
             settingsSfxVol = (settingsSfxVol >= 100) ? 0 : settingsSfxVol + 25;
             m_audio->setSfxVolume(settingsSfxVol);
+        } else if (settingsCursor == 2) {
+            // 영점 재보정: 현재 자세를 중앙으로 즉시 설정
+            m_sensor.rezero();
+            aimPos = QPoint(width() / 2, height() / 2);
+            gameState = prevState;
+            if (prevState == Playing) {
+                gameDurationMs = pausedRemainingMs;
+                gameElapsed.restart();
+            }
+            updateButtonLayout();
         } else {
             // 나가기
             gameState = prevState;
@@ -901,7 +948,10 @@ void MainWindow::onGpioPressed()
         fire();
         break;
     case GameOver:
-        retryGame();
+        if (gameOverCursor == 0)
+            retryGame();
+        else
+            goToMainMenu();
         break;
     }
 }
@@ -911,7 +961,10 @@ void MainWindow::onSw2Pressed()
 {
     if (gameState == Settings) {
         settingsCursor++;
-        if (settingsCursor > 2) settingsCursor = 0;
+        if (settingsCursor > 3) settingsCursor = 0;
+        update();
+    } else if (gameState == GameOver) {
+        gameOverCursor = (gameOverCursor + 1) % 2;
         update();
     }
 }
@@ -921,7 +974,10 @@ void MainWindow::onSw3Pressed()
 {
     if (gameState == Settings) {
         settingsCursor--;
-        if (settingsCursor < 0) settingsCursor = 2;
+        if (settingsCursor < 0) settingsCursor = 3;
+        update();
+    } else if (gameState == GameOver) {
+        gameOverCursor = (gameOverCursor + 1) % 2;
         update();
     } else if (gameState != GyroCalibrating && gameState != HowToPlay && gameState != Countdown) {
         // 대부분의 상태에서 설정 진입 가능
@@ -1016,11 +1072,10 @@ void MainWindow::fire()
         } else {
             // 3박스 타겟 히트 체크
             int boxW = 70, boxH = 50;
-            int by = height() - 180;
             QRect calBoxes[3] = {
-                QRect(width() / 4 - boxW / 2, by, boxW, boxH),
-                QRect(width() / 2 - boxW / 2, by, boxW, boxH),
-                QRect(3 * width() / 4 - boxW / 2, by, boxW, boxH),
+                QRect(width() / 4 - boxW / 2, height() - 180, boxW, boxH),
+                QRect(width() / 2 - boxW / 2, 120, boxW, boxH),
+                QRect(3 * width() / 4 - boxW / 2, height() - 180, boxW, boxH),
             };
             for (int i = 0; i < 3; i++) {
                 if (!calBoxHit[i] && calBoxes[i].contains(aimPos)) {

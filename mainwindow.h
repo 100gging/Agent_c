@@ -163,6 +163,9 @@ private:
     GpioButton   *m_sw2Btn;    // BCM17: 아래
     GpioButton   *m_sw3Btn;    // BCM18: 위/설정진입
 
+    // 게임 오버 커서
+    int  gameOverCursor;       // 0: Retry, 1: Main Menu
+
     // 환경설정
     int  settingsCursor;       // 0: BGM, 1: SFX, 2: 나가기
     int  settingsBgmVol;       // 0,25,50,75,100
