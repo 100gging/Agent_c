@@ -218,12 +218,13 @@ bool AlsaPlayer::loadWav(const QString &filePath, WavData &out)
     return true;
 }
 
-bool AlsaPlayer::loadSfx(const QString &name, const QString &filePath)
+bool AlsaPlayer::loadSfx(const QString &name, const QString &filePath, int gain)
 {
     WavData wav;
     if (!loadWav(filePath, wav))
         return false;
     m_sfxMap[name] = wav;
+    m_sfxGain[name] = qBound(0, gain, 200);
     return true;
 }
 
@@ -239,8 +240,9 @@ bool AlsaPlayer::loadBgm(const QString &name, const QString &filePath)
 void AlsaPlayer::playSfx(const QString &name)
 {
     if (!m_sfxMap.contains(name)) return;
-    // 새 스레드에서 재생 (완료 후 자동 삭제)
-    SfxThread *t = new SfxThread(m_sfxMap[name], m_sfxVolume);
+    int vol = (m_sfxVolume * m_sfxGain.value(name, 100)) / 100;
+    vol = qBound(0, vol, 200);
+    SfxThread *t = new SfxThread(m_sfxMap[name], vol);
     t->start();
 }
 

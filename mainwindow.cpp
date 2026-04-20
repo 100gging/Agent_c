@@ -139,10 +139,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ALSA 사운드 초기화
     m_audio = new AlsaPlayer(this);
-    m_audio->loadSfx("fire", "sounds/fire.wav");
+    m_audio->loadSfx("fire", "sounds/fire.wav", 150);
     m_audio->loadSfx("enemy_dead", "sounds/enemy_dead.wav");
     m_audio->loadSfx("ally_dead", "sounds/ally_dead.wav");
     m_audio->loadBgm("menu", "sounds/butterfly.wav");
+    m_audio->setBgmVolume(100);
     m_audio->loadBgm("game", "sounds/gamebgm.wav");
     m_audio->playBgm("menu");
 
@@ -815,7 +816,6 @@ void MainWindow::onGpioPressed()
 void MainWindow::startGame()
 {
     // START 버튼 누르면 캘리브레이션으로
-    m_audio->stopBgm();
     enterCalibration();
 }
 
@@ -845,6 +845,7 @@ void MainWindow::showCountdown()
 {
     gameState = Countdown;
     countdownPage = 0;
+    m_audio->stopBgm();
     countdownElapsed.start();
     updateButtonLayout();
     update();

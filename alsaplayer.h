@@ -60,7 +60,7 @@ public:
     explicit AlsaPlayer(QObject *parent = nullptr);
     ~AlsaPlayer();
 
-    bool loadSfx(const QString &name, const QString &filePath);
+    bool loadSfx(const QString &name, const QString &filePath, int gain = 100);
     bool loadBgm(const QString &name, const QString &filePath);
 
     void playSfx(const QString &name);
@@ -74,6 +74,7 @@ private:
     bool loadWav(const QString &filePath, WavData &out);
 
     QMap<QString, WavData> m_sfxMap;
+    QMap<QString, int>     m_sfxGain; // per-sfx gain 0~200
     QMap<QString, WavData> m_bgmMap;
     BgmThread *m_bgmThread;
     int m_sfxVolume;
