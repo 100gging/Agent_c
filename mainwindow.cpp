@@ -53,13 +53,15 @@ MainWindow::MainWindow(QWidget *parent)
       btnNext(nullptr),
       btnRetry(nullptr),
       btnMainMenu(nullptr),
+      m_calibThread(nullptr),
       m_gpioBtn(new GpioButton(4, this)),
       m_sw2Btn(new GpioButton(17, this)),
       m_sw3Btn(new GpioButton(18, this)),
       settingsCursor(0),
-      settingsBgmVol(50),
+      settingsBgmVol(100),
       settingsSfxVol(100),
-      prevState(Menu)
+      prevState(Menu),
+      pausedRemainingMs(0)
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -148,7 +150,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_audio->loadSfx("fire", "sounds/fire.wav", 150);
     m_audio->loadSfx("enemy_dead", "sounds/enemy_dead.wav");
     m_audio->loadSfx("ally_dead", "sounds/ally_dead.wav");
-    m_audio->loadBgm("menu", "sounds/butterfly.wav");
+    m_audio->loadBgm("menu", "sounds/butterfly.wav", 50);
     m_audio->setBgmVolume(100);
     m_audio->loadBgm("game", "sounds/gamebgm.wav");
     m_audio->playBgm("menu");
@@ -458,8 +460,10 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     if (gameState == Settings) {
-        // 환경설정 화면 - 어두운 배경
-        painter.fillRect(rect(), QColor(15, 15, 15));
+        // 환경설정 화면 - 배경 이미지 + 어두운 오버레이
+        if (!backgroundPixmap.isNull())
+            painter.drawPixmap(rect(), backgroundPixmap);
+        painter.fillRect(rect(), QColor(0, 0, 0, 160));
 
         painter.setFont(bigFont);
         painter.setPen(QColor(220, 220, 220));
@@ -546,6 +550,15 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.drawPixmap(rect(), pm);
         else
             painter.fillRect(rect(), QColor(10, 10, 10));
+        return;
+    }
+
+    if (gameState == GyroCalibrating) {
+        // 자이로 보정 중 로딩 화면
+        painter.fillRect(rect(), QColor(10, 10, 10));
+        painter.setFont(bigFont);
+        painter.setPen(Qt::white);
+        painter.drawText(rect(), Qt::AlignCenter, "CALIBRATING SENSOR...");
         return;
     }
 
@@ -859,6 +872,11 @@ void MainWindow::onGpioPressed()
         } else {
             // 나가기
             gameState = prevState;
+            if (prevState == Playing) {
+                // 게임 복귀: 남은 시간으로 재설정
+                gameDurationMs = pausedRemainingMs;
+                gameElapsed.restart();
+            }
             updateButtonLayout();
         }
         update();
@@ -905,9 +923,14 @@ void MainWindow::onSw3Pressed()
         settingsCursor--;
         if (settingsCursor < 0) settingsCursor = 2;
         update();
-    } else if (gameState == Menu) {
-        // 메뉴에서 SW3 누르면 설정 진입
+    } else if (gameState != GyroCalibrating && gameState != HowToPlay && gameState != Countdown) {
+        // 대부분의 상태에서 설정 진입 가능
         prevState = gameState;
+        if (gameState == Playing) {
+            // 게임 일시정지: 남은 시간 저장
+            pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
+            if (pausedRemainingMs < 0) pausedRemainingMs = 0;
+        }
         settingsCursor = 0;
         gameState = Settings;
         updateButtonLayout();
@@ -955,17 +978,22 @@ void MainWindow::showCountdown()
 
 void MainWindow::enterCalibration()
 {
-    /* 자이로 센서 초기화 + 보정 */
+    /* 자이로 센서 초기화 + 보정 (별도 스레드) */
     gameState = GyroCalibrating;
     updateButtonLayout();
-    update();
-    QApplication::processEvents();
+    repaint();  // 즉시 동기 렌더링 — 깜빡임 방지
 
-    if (m_sensor.init()) {
-        m_sensor.calibrateGyroOffset(500);
-        m_sensor.calibrateCenter(200);
-    }
+    m_calibThread = new SensorCalibThread(&m_sensor, this);
+    connect(m_calibThread, &SensorCalibThread::calibrationDone,
+            this, &MainWindow::onCalibrationDone);
+    connect(m_calibThread, &QThread::finished,
+            m_calibThread, &QObject::deleteLater);
+    m_calibThread->start();
+}
 
+void MainWindow::onCalibrationDone()
+{
+    m_calibThread = nullptr;
     gameState = Calibrating;
     calPhase = 0;
     aimPos = QPoint(width() / 2, height() / 2);

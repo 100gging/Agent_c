@@ -11,6 +11,7 @@
 #include <QMap>
 #include <QString>
 #include <QElapsedTimer>
+#include <QThread>
 #include "alsaplayer.h"
 #include "mpu6050sensor.h"
 #include "gpiobutton.h"
@@ -24,6 +25,28 @@ struct Target {
     bool   isEnemy;
     QString typeName;
     int    dirChangeFrames; // 방향 전환까지 남은 프레임 (지상 유닛용)
+};
+
+// 센서 보정용 워커 스레드
+class SensorCalibThread : public QThread
+{
+    Q_OBJECT
+public:
+    SensorCalibThread(MPU6050Sensor *sensor, QObject *parent = nullptr)
+        : QThread(parent), m_sensor(sensor) {}
+signals:
+    void calibrationDone();
+protected:
+    void run() override {
+        if (m_sensor->init())
+        {
+            m_sensor->calibrateGyroOffset(500);
+            m_sensor->calibrateCenter(200);
+        }
+        emit calibrationDone();
+    }
+private:
+    MPU6050Sensor *m_sensor;
 };
 
 class MainWindow : public QMainWindow
@@ -54,6 +77,7 @@ private slots:
     void startPlaying();
     void retryGame();
     void goToMainMenu();
+    void onCalibrationDone();
 
 private:
     bool    isBlockedByWall(QPoint from, QPoint to);
@@ -134,6 +158,7 @@ private:
     QPushButton *btnMainMenu;
 
     MPU6050Sensor m_sensor;
+    SensorCalibThread *m_calibThread;
     GpioButton   *m_gpioBtn;   // BCM4: 발사/선택
     GpioButton   *m_sw2Btn;    // BCM17: 아래
     GpioButton   *m_sw3Btn;    // BCM18: 위/설정진입
@@ -143,6 +168,7 @@ private:
     int  settingsBgmVol;       // 0,25,50,75,100
     int  settingsSfxVol;       // 0,25,50,75,100
     GameState prevState;       // 설정 진입 전 상태
+    int  pausedRemainingMs;    // 게임 일시정지 시 남은 시간
 
     // 사운드 (ALSA)
     AlsaPlayer *m_audio;
