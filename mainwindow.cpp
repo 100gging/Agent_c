@@ -313,6 +313,9 @@ void MainWindow::resetTargets()
 {
     targets.clear();
     targets.append(spawnEnemy());
+    targets.append(spawnEnemy());
+    targets.append(spawnEnemy());
+    targets.append(spawnAlly());
     targets.append(spawnAlly());
 }
 
