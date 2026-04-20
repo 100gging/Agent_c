@@ -516,7 +516,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
         // 하단 안내
         painter.setFont(QFont("Arial", 14));
-        drawOutlinedText(rect().adjusted(0, 270, 0, 0), Qt::AlignCenter,
+        drawOutlinedText(rect().adjusted(0, 350, 0, 0), Qt::AlignCenter,
                          "SW2: DOWN  |  SW3: UP  |  FIRE: SELECT");
         return;
     }
@@ -582,12 +582,12 @@ void MainWindow::paintEvent(QPaintEvent *event)
         // 캘리브레이션 화면
         painter.setFont(bigFont);
         painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -80, 0, 0), Qt::AlignCenter, "CALIBRATION");
+        painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter, "CALIBRATION");
 
         if (calPhase == 0) {
             // Phase 0: 영점 조절 — 사과만 보이고 조준선 없음
             painter.setFont(subFont);
-            drawOutlinedText(rect().adjusted(0, 60, 0, 0), Qt::AlignCenter,
+            drawOutlinedText(rect().adjusted(0, 100, 0, 0), Qt::AlignCenter,
                              "Aim at the apple and press FIRE to zero in");
 
             QPoint calTarget(width() / 2, height() / 2);
