@@ -267,6 +267,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_audio->loadSfx("fire", "sounds/fire.wav", 150);
     m_audio->loadSfx("enemy_dead", "sounds/enemy_dead.wav");
     m_audio->loadSfx("ally_dead", "sounds/ally_dead.wav");
+    m_audio->loadSfx("enemy_attack", "sounds/enemy_attack.wav");
     m_audio->loadBgm("menu", "sounds/butterfly.wav");
     m_audio->setBgmVolume(100);
     m_audio->loadBgm("game", "sounds/gamebgm.wav");
@@ -1171,6 +1172,7 @@ void MainWindow::gameLoop()
                     enemyAttackActive = true;
                     m_serverEnemyAttackOnly = false; // natural phase2 attack: both players show it
                     enemyAttackTimer.restart();
+                    m_audio->playSfx("enemy_attack");
                 } else if (blackgatmonPhase == 2) {
                     blackgatmonPopY += 16.0f;
                     if (blackgatmonPopY >= (float)height()) {
@@ -1213,6 +1215,7 @@ void MainWindow::onGpioPressed()
         } else if (settingsCursor == 1) {
             settingsSfxVol = (settingsSfxVol >= 100) ? 0 : settingsSfxVol + 25;
             m_audio->setSfxVolume(settingsSfxVol);
+            m_audio->playSfx("fire");
         } else if (settingsCursor == 2) {
             m_sensor.rezero();
             aimPos = QPoint(width() / 2, height() / 2);
@@ -1482,7 +1485,7 @@ void MainWindow::fire()
                 HitInfo hi;
                 hi.pos = aimPos;
                 hi.isEnemy = (hitCode == 1 || hitCode == 5);
-                hi.framesLeft = hi.isEnemy ? 12 : 6;
+                hi.framesLeft = 6;
                 activeHits.append(hi);
             }
         } else {
@@ -1510,7 +1513,7 @@ void MainWindow::fire()
             HitInfo hi;
             hi.pos = aimPos;
             hi.isEnemy = true;
-            hi.framesLeft = 12; // blackgatmon is enemy, keep 12
+            hi.framesLeft = 6;
             activeHits.append(hi);
             m_audio->playSfx("enemy_dead");
             blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
@@ -1542,7 +1545,7 @@ void MainWindow::fire()
             HitInfo hi;
             hi.pos = aimPos;
             hi.isEnemy = t.isEnemy;
-            hi.framesLeft = t.isEnemy ? 12 : 6;
+            hi.framesLeft = 6;
             activeHits.append(hi);
             if (t.isEnemy)
                 m_audio->playSfx("enemy_dead");
@@ -1619,6 +1622,7 @@ int MainWindow::processHitForPlayer(QPoint aim, bool isServer)
                 enemyAttackActive = true;
                 m_serverEnemyAttackOnly = true;
                 enemyAttackTimer.restart();
+                m_audio->playSfx("enemy_attack");
                 return 6;
             }
         }
@@ -1703,7 +1707,7 @@ void MainWindow::parseStateString(const QString &s)
         HitInfo hi;
         hi.pos = aimPos;
         hi.isEnemy = (hitCode == 3 || hitCode == 6);
-        hi.framesLeft = hi.isEnemy ? 12 : 6;
+        hi.framesLeft = 6;
         activeHits.append(hi);
     }
 
@@ -1712,6 +1716,7 @@ void MainWindow::parseStateString(const QString &s)
     if (hitCode == 5) {
         enemyAttackActive = true;
         enemyAttackTimer.restart();
+        m_audio->playSfx("enemy_attack");
     }
 
     // 타겟 목록 파싱
@@ -1745,6 +1750,7 @@ void MainWindow::parseStateString(const QString &s)
         if (serverEnemyAttack && !enemyAttackActive) {
             enemyAttackActive = true;
             enemyAttackTimer.restart();
+            m_audio->playSfx("enemy_attack");
         }
     }
 
