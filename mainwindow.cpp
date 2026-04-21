@@ -47,7 +47,6 @@ MainWindow::MainWindow(QWidget *parent)
       gameDurationMs(30000),
       fireEffect(false),
       btnStart(nullptr),
-      btnNext(nullptr),
       btnRetry(nullptr),
       btnMainMenu(nullptr),
       m_calibThread(nullptr),
@@ -59,7 +58,14 @@ MainWindow::MainWindow(QWidget *parent)
       settingsBgmVol(100),
       settingsSfxVol(100),
       prevState(Menu),
-      pausedRemainingMs(0)
+      pausedRemainingMs(0),
+      blackgatmonActive(false),
+      blackgatmonSlot(0),
+      blackgatmonPopY(0),
+      blackgatmonPopped(false),
+      blackgatmonPhase(0),
+      blackgatmonNextSpawnMs(7000),
+      enemyAttackActive(false)
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -70,39 +76,39 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 모든 이미지 프리로드
     for (auto &d : ENEMY_DEFS)
-        pixmaps[d.name] = QPixmap(QString(":/images/%1.png").arg(d.name));
+        pixmaps[d.name] = QPixmap(QString("images/%1.png").arg(d.name));
     for (auto &d : ALLY_DEFS)
-        pixmaps[d.name] = QPixmap(QString(":/images/%1.png").arg(d.name));
+        pixmaps[d.name] = QPixmap(QString("images/%1.png").arg(d.name));
 
     for (auto it = pixmaps.constBegin(); it != pixmaps.constEnd(); ++it) {
         if (!it.value().isNull())
             spriteMasks[it.key()] = it.value().toImage().convertToFormat(QImage::Format_ARGB32);
     }
 
-    backgroundPixmap = QPixmap(":/images/background_game.png");
-    applePixmap = QPixmap(":/images/apple.png");
+    backgroundPixmap = QPixmap("images/background_game.png");
+    applePixmap = QPixmap("images/apple.png");
 
-    howToPlay1Pixmap = QPixmap(":/images/how_to_play1.png");
-    howToPlay2Pixmap = QPixmap(":/images/how_to_play2.png");
-    howToPlay3Pixmap = QPixmap(":/images/how_to_play3.png");
+    howToPlay1Pixmap = QPixmap("images/how_to_play1.png");
+    howToPlay2Pixmap = QPixmap("images/how_to_play2.png");
+    howToPlay3Pixmap = QPixmap("images/how_to_play3.png");
     howToPlayPage = 0;
     howToPlayDurationMs = 3000;
 
     // Story images
     for (int i = 0; i < 5; i++)
-        storyPixmaps[i] = QPixmap(QString(":/images/story%1.png").arg(i + 1));
+        storyPixmaps[i] = QPixmap(QString("images/story%1.png").arg(i + 1));
     storyPage = 0;
 
-    ready1Pixmap = QPixmap(":/images/ready_1.png");
-    ready2Pixmap = QPixmap(":/images/ready_2.png");
-    ready3Pixmap = QPixmap(":/images/ready_3.png");
-    loadingPixmap = QPixmap(":/images/loading.png");
+    ready1Pixmap = QPixmap("images/ready_1.png");
+    ready2Pixmap = QPixmap("images/ready_2.png");
+    ready3Pixmap = QPixmap("images/ready_3.png");
+    loadingPixmap = QPixmap("images/loading.png");
     countdownPage = 0;
 
     // Effect images (attack, dam_enemy, dam_ally)
-    attackPixmap = QPixmap(":/images/attack.png");
-    damEnemyPixmap = QPixmap(":/images/dam_enemy.png");
-    damAllyPixmap = QPixmap(":/images/dam_ally.png");
+    attackPixmap = QPixmap("images/attack.png");
+    damEnemyPixmap = QPixmap("images/dam_enemy.png");
+    damAllyPixmap = QPixmap("images/dam_ally.png");
 
     // Remove background from effect images (white/checkerboard AND black)
     auto removeEffectBg = [](QPixmap &pm) {
@@ -131,6 +137,19 @@ MainWindow::MainWindow(QWidget *parent)
     removeEffectBg(damEnemyPixmap);
     removeEffectBg(damAllyPixmap);
 
+    // Blackgatmon & enemy_attack
+    blackgatmonPixmap = QPixmap("images/blackgatmon.png");
+    blackgatmon2Pixmap = QPixmap("images/blackgatmon2.png");
+    blackgatmon3Pixmap = QPixmap("images/blackgatmon3.png");
+    enemyAttackPixmap = QPixmap("images/enemy_attack.png");
+    if (!blackgatmonPixmap.isNull())
+        blackgatmonMask = blackgatmonPixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+    if (!blackgatmon2Pixmap.isNull())
+        blackgatmon2Mask = blackgatmon2Pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+    removeEffectBg(blackgatmon3Pixmap);
+    if (!blackgatmon3Pixmap.isNull())
+        blackgatmon3Mask = blackgatmon3Pixmap.toImage().convertToFormat(QImage::Format_ARGB32);
+
     // apple.png 격자무늬(체커보드) 배경 제거 + 절반 크기
     if (!applePixmap.isNull()) {
         QImage appleImg = applePixmap.toImage().convertToFormat(QImage::Format_ARGB32);
@@ -151,9 +170,9 @@ MainWindow::MainWindow(QWidget *parent)
             Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
 
-    treePixmap = QPixmap(":/images/tree.png");
-    bushPixmap = QPixmap(":/images/bush.png");
-    leafPixmap = QPixmap(":/images/leaf.png");
+    treePixmap = QPixmap("images/tree.png");
+    bushPixmap = QPixmap("images/bush.png");
+    leafPixmap = QPixmap("images/leaf.png");
 
     // 좌우 반전 leaf
     if (!leafPixmap.isNull()) {
@@ -216,7 +235,6 @@ MainWindow::~MainWindow()
 void MainWindow::setupUiButtons()
 {
     btnStart = new QPushButton("GAME START", this);
-    btnNext = new QPushButton("START MISSION", this);
     btnRetry = new QPushButton("RETRY", this);
     btnMainMenu = new QPushButton("MAIN MENU", this);
 
@@ -264,16 +282,14 @@ void MainWindow::setupUiButtons()
 
     btnRetry->setStyleSheet(commonStyle);
     btnMainMenu->setStyleSheet(commonStyle);
-    btnNext->setStyleSheet(commonStyle);
     btnStart->setStyleSheet(startStyle);
 
-    for (QPushButton *btn : {btnStart, btnNext, btnRetry, btnMainMenu}) {
+    for (QPushButton *btn : {btnStart, btnRetry, btnMainMenu}) {
         btn->setFocusPolicy(Qt::NoFocus);
         btn->setAutoRepeat(false);
     }
 
     connect(btnStart,    &QPushButton::pressed, this, &MainWindow::startGame);
-    connect(btnNext,     &QPushButton::pressed, this, &MainWindow::startPlaying);
     connect(btnRetry,    &QPushButton::pressed, this, &MainWindow::retryGame);
     connect(btnMainMenu, &QPushButton::pressed, this, &MainWindow::goToMainMenu);
 
@@ -436,16 +452,11 @@ void MainWindow::updateButtonLayout()
     // 메뉴 버튼
     btnStart->setGeometry(w / 2 - 140, h / 2 + 40, 280, 90);
 
-    // 브리핑 다음 버튼
-    btnNext->setGeometry(w / 2 - 140, h - 90, 280, 70);
-
     // 상태에 따라 버튼 표시/숨김
     bool isMenu       = (gameState == Menu);
-    bool isBriefing   = (gameState == Briefing);
     bool isGameOver   = (gameState == GameOver);
 
     btnStart->setVisible(isMenu);
-    btnNext->setVisible(isBriefing);
     btnRetry->setVisible(isGameOver);
     btnMainMenu->setVisible(isGameOver);
 }
@@ -610,30 +621,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.setPen(Qt::white);
             painter.drawText(rect(), Qt::AlignCenter, "LOADING...");
         }
-        return;
-    }
-
-    if (gameState == Briefing) {
-        // 스토리 / 브리핑 화면
-        painter.setFont(bigFont);
-        painter.setPen(QColor(255, 60, 60));
-        painter.drawText(rect().adjusted(0, -200, 0, 0), Qt::AlignCenter, "MISSION BRIEFING");
-
-        QFont briefFont("Arial", 17);
-        painter.setFont(briefFont);
-        painter.setPen(Qt::white);
-
-        QString briefing =
-            "Agent C, listen carefully.\n\n"
-            "Hostile targets have been spotted in the area.\n"
-            "Your mission: eliminate all RED targets on sight.\n\n"
-            "[SHOOT]  Red enemy targets\n"
-            "[DO NOT SHOOT]  Civilians (non-red)\n\n"
-            "Use the directional buttons to aim.\n"
-            "Press FIRE to shoot.\n\n"
-            "You have 30 seconds. Good luck, Agent.";
-
-        painter.drawText(rect().adjusted(80, -40, -80, -80), Qt::AlignLeft | Qt::TextWordWrap, briefing);
         return;
     }
 
@@ -816,8 +803,8 @@ void MainWindow::paintEvent(QPaintEvent *event)
     for (const HitInfo &hi : activeHits) {
         const QPixmap &damPm = hi.isEnemy ? damEnemyPixmap : damAllyPixmap;
         if (!damPm.isNull()) {
-            int dw = 120;
-            int dh = (int)(120.0 * damPm.height() / qMax(1, damPm.width()));
+            int dw = hi.isEnemy ? 130 : 90;
+            int dh = (int)((double)dw * damPm.height() / qMax(1, damPm.width()));
             painter.drawPixmap(hi.pos.x() - dw / 2, hi.pos.y() - dh / 2, dw, dh, damPm);
         } else {
             painter.setPen(QPen(Qt::white, 5));
@@ -829,6 +816,25 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.drawText(hi.pos.x() + 25, hi.pos.y() - 30,
                              hi.isEnemy ? "+HIT!" : "-ALLY!");
         }
+    }
+
+    // Blackgatmon 렌더링 (phase에 따라 다른 이미지)
+    if (blackgatmonActive) {
+        int bgSize = 300;
+        int slotX;
+        if (blackgatmonSlot == 0)      slotX = width() / 4 - bgSize / 2;
+        else if (blackgatmonSlot == 1)  slotX = width() / 2 - bgSize / 2;
+        else                            slotX = 3 * width() / 4 - bgSize / 2;
+        const QPixmap &bgPm = (blackgatmonPhase == 2) ? blackgatmon3Pixmap
+                            : (blackgatmonPhase == 1) ? blackgatmon2Pixmap
+                            : blackgatmonPixmap;
+        if (!bgPm.isNull())
+            painter.drawPixmap(slotX, (int)blackgatmonPopY, bgSize, bgSize, bgPm);
+    }
+
+    // enemy_attack 전체 화면 오버레이
+    if (enemyAttackActive && !enemyAttackPixmap.isNull()) {
+        painter.drawPixmap(rect(), enemyAttackPixmap);
     }
 
     // 게임 종료 화면
@@ -950,6 +956,7 @@ void MainWindow::gameLoop()
         remainingMs = 0;
         gameState = GameOver;
         gameOverCursor = 0;
+        gameOverTimer.restart();
         m_audio->stopBgm();
         updateButtonLayout();
     }
@@ -1001,6 +1008,69 @@ void MainWindow::gameLoop()
             activeHits.removeAt(i);
     }
 
+    // --- Blackgatmon logic ---
+    // enemy_attack overlay countdown
+    if (enemyAttackActive) {
+        if (enemyAttackTimer.elapsed() >= 2000) {
+            enemyAttackActive = false;
+            if (!blackgatmonActive) {
+                blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+                blackgatmonSpawnCooldown.restart();
+            }
+        }
+    }
+    // Blackgatmon active: pop-up animation + phase system
+    if (blackgatmonActive) {
+        int bgSize = 300;
+        float targetY = height() - bgSize + 60;
+
+        if (!blackgatmonPopped) {
+            // Pop-up animation: rise from bottom
+            if (blackgatmonPopY > targetY)
+                blackgatmonPopY -= 16.0f;
+            if (blackgatmonPopY <= targetY) {
+                blackgatmonPopY = targetY;
+                blackgatmonPopped = true;
+                blackgatmonPhase = 0;
+                blackgatmonPhaseTimer.restart();
+            }
+        } else {
+            // Phase 0: blackgatmon.png for 0.5s
+            // Phase 1: blackgatmon2.png for 1.0s
+            if (blackgatmonPhase == 0 && blackgatmonPhaseTimer.elapsed() >= 500) {
+                blackgatmonPhase = 1;
+                blackgatmonPhaseTimer.restart();
+            } else if (blackgatmonPhase == 1 && blackgatmonPhaseTimer.elapsed() >= 1000) {
+                // Phase 2: blackgatmon3.png + 하강 + enemy_attack 동시 시작
+                blackgatmonPhase = 2;
+                blackgatmonPhaseTimer.restart();
+                enemyAttackActive = true;
+                enemyAttackTimer.restart();
+            } else if (blackgatmonPhase == 2) {
+                // 하강 애니메이션
+                blackgatmonPopY += 16.0f;
+                if (blackgatmonPopY >= (float)height()) {
+                    blackgatmonActive = false;
+                    blackgatmonPopped = false;
+                    if (!enemyAttackActive) {
+                        blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+                        blackgatmonSpawnCooldown.restart();
+                    }
+                }
+            }
+        }
+    }
+    // Spawn cooldown: random 5~10s between spawns
+    else if (!enemyAttackActive) {
+        if (blackgatmonSpawnCooldown.elapsed() >= blackgatmonNextSpawnMs) {
+            blackgatmonActive = true;
+            blackgatmonSlot = QRandomGenerator::global()->bounded(3); // 0=left, 1=center, 2=right
+            blackgatmonPopY = (float)height(); // start below screen
+            blackgatmonPopped = false;
+            blackgatmonPhase = 0;
+        }
+    }
+
     fireEffect = false;
     update();
 }
@@ -1010,7 +1080,6 @@ void MainWindow::gameLoop()
    상태에 따라 다른 동작:
    - Menu → 게임 시작 (startGame)
    - Calibrating → fire (영점/타겟)
-   - Briefing → startPlaying
    - Playing → fire (총 발사)
    - GameOver → retryGame
    ================================================================ */
@@ -1073,13 +1142,11 @@ void MainWindow::onGpioPressed()
     case Loading:
         /* 진행 중 무시 */
         break;
-    case Briefing:
-        startPlaying();
-        break;
     case Playing:
         fire();
         break;
     case GameOver:
+        if (gameOverTimer.elapsed() < 2000) break;
         if (gameOverCursor == 0)
             retryGame();
         else
@@ -1096,6 +1163,7 @@ void MainWindow::onSw2Pressed()
         if (settingsCursor > 3) settingsCursor = 0;
         update();
     } else if (gameState == GameOver) {
+        if (gameOverTimer.elapsed() < 2000) return;
         gameOverCursor = (gameOverCursor + 1) % 2;
         update();
     }
@@ -1109,6 +1177,7 @@ void MainWindow::onSw3Pressed()
         if (settingsCursor < 0) settingsCursor = 3;
         update();
     } else if (gameState == GameOver) {
+        if (gameOverTimer.elapsed() < 2000) return;
         gameOverCursor = (gameOverCursor + 1) % 2;
         update();
     } else if (gameState != GyroCalibrating && gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading) {
@@ -1151,13 +1220,6 @@ void MainWindow::showHowToPlay()
     update();
 }
 
-void MainWindow::showBriefing()
-{
-    gameState = Briefing;
-    updateButtonLayout();
-    update();
-}
-
 void MainWindow::showLoading()
 {
     gameState = Loading;
@@ -1165,11 +1227,6 @@ void MainWindow::showLoading()
     m_audio->stopBgm();
     updateButtonLayout();
     update();
-}
-
-void MainWindow::startPlaying()
-{
-    showCountdown();
 }
 
 void MainWindow::showCountdown()
@@ -1242,8 +1299,36 @@ void MainWindow::fire()
     }
     if (gameState != Playing) return;
 
+    // enemy_attack 오버레이 중에는 발사 불가
+    if (enemyAttackActive) return;
+
     fireEffect = true;
     m_audio->playSfx("fire");
+
+    // Blackgatmon 히트 체크
+    if (blackgatmonActive) {
+        int bgSize = 300;
+        int slotX;
+        if (blackgatmonSlot == 0)      slotX = width() / 4 - bgSize / 2;
+        else if (blackgatmonSlot == 1)  slotX = width() / 2 - bgSize / 2;
+        else                            slotX = 3 * width() / 4 - bgSize / 2;
+        QRect bgRect(slotX, (int)blackgatmonPopY, bgSize, bgSize);
+        const QImage &mask = (blackgatmonPhase == 2) ? blackgatmon3Mask
+                           : (blackgatmonPhase == 1) ? blackgatmon2Mask
+                           : blackgatmonMask;
+        if (pointHitsOpaquePixel(mask, bgRect, aimPos)) {
+            blackgatmonActive = false;
+            score += 100;
+            HitInfo hi;
+            hi.pos = aimPos;
+            hi.isEnemy = true;
+            hi.framesLeft = 12;
+            activeHits.append(hi);
+            m_audio->playSfx("enemy_dead");
+            blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+            blackgatmonSpawnCooldown.restart();
+        }
+    }
 
     static const QPoint hitProbeOffsets[] = {
         QPoint(0, 0),
@@ -1267,7 +1352,7 @@ void MainWindow::fire()
             score += t.points;
             // Record hit at monster's position
             HitInfo hi;
-            hi.pos = t.pos;
+            hi.pos = aimPos;
             hi.isEnemy = t.isEnemy;
             hi.framesLeft = 12;
             activeHits.append(hi);
@@ -1320,6 +1405,10 @@ void MainWindow::resetGame()
     gameDurationMs = 30000;
     fireEffect = false;
     activeHits.clear();
+    blackgatmonActive = false;
+    enemyAttackActive = false;
+    blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+    blackgatmonSpawnCooldown.restart();
     aimPos = centerPos;
     resetTargets();
 }

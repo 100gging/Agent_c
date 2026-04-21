@@ -54,7 +54,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, GyroCalibrating, Calibrating, Story, HowToPlay, Briefing, Loading, Countdown, Playing, GameOver, Settings };
+    enum GameState { Menu, GyroCalibrating, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -71,12 +71,10 @@ private slots:
     void onSw3Pressed();
     void startGame();
     void enterCalibration();
-    void showBriefing();
     void showHowToPlay();
     void showStory();
     void showCountdown();
     void showLoading();
-    void startPlaying();
     void retryGame();
     void goToMainMenu();
     void onCalibrationDone();
@@ -169,11 +167,29 @@ private:
     QPixmap damEnemyPixmap;
     QPixmap damAllyPixmap;
 
+    // Blackgatmon boss enemy
+    QPixmap blackgatmonPixmap;
+    QPixmap blackgatmon2Pixmap;
+    QPixmap blackgatmon3Pixmap;
+    QImage  blackgatmonMask;
+    QImage  blackgatmon2Mask;
+    QImage  blackgatmon3Mask;
+    QPixmap enemyAttackPixmap;
+    bool    blackgatmonActive;      // is blackgatmon currently on screen
+    int     blackgatmonSlot;        // 0=left, 1=center, 2=right
+    float   blackgatmonPopY;        // current Y offset for pop-up animation
+    bool    blackgatmonPopped;      // true when fully risen
+    int     blackgatmonPhase;       // 0=blackgatmon.png, 1=blackgatmon2.png, 2=blackgatmon3.png(descend)
+    QElapsedTimer blackgatmonPhaseTimer; // phase duration timer
+    QElapsedTimer blackgatmonSpawnCooldown; // time until next spawn
+    int     blackgatmonNextSpawnMs;  // random cooldown duration
+    bool    enemyAttackActive;      // enemy_attack overlay blocking screen
+    QElapsedTimer enemyAttackTimer; // 2s overlay duration
+
     bool calBoxHit[3];
     int  calPhase;     // 0: 영점(사과), 1: 3박스 타겟
 
     QPushButton *btnStart;
-    QPushButton *btnNext;
     QPushButton *btnRetry;
     QPushButton *btnMainMenu;
 
@@ -185,6 +201,7 @@ private:
 
     // 게임 오버 커서
     int  gameOverCursor;       // 0: Retry, 1: Main Menu
+    QElapsedTimer gameOverTimer; // 2초 입력 잠금
 
     // 환경설정
     int  settingsCursor;       // 0: BGM, 1: SFX, 2: 나가기
