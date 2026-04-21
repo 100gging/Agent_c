@@ -122,18 +122,19 @@ MainWindow::MainWindow(QWidget *parent)
     auto removeEffectBg = [](QPixmap &pm) {
         if (pm.isNull()) return;
         QImage img = pm.toImage().convertToFormat(QImage::Format_ARGB32);
-        for (int py = 0; py < img.height(); ++py) {
-            for (int px = 0; px < img.width(); ++px) {
-                QRgb pixel = img.pixel(px, py);
-                int r = qRed(pixel), g = qGreen(pixel), b = qBlue(pixel);
+        int w = img.width(), h = img.height();
+        for (int py = 0; py < h; ++py) {
+            QRgb *line = reinterpret_cast<QRgb*>(img.scanLine(py));
+            for (int px = 0; px < w; ++px) {
+                int r = qRed(line[px]), g = qGreen(line[px]), b = qBlue(line[px]);
                 int maxC = qMax(r, qMax(g, b));
                 int minC = qMin(r, qMin(g, b));
                 if ((maxC - minC) < 35 && minC > 140) {
-                    img.setPixel(px, py, qRgba(0, 0, 0, 0));
+                    line[px] = qRgba(0, 0, 0, 0);
                     continue;
                 }
                 if (maxC < 50) {
-                    img.setPixel(px, py, qRgba(0, 0, 0, 0));
+                    line[px] = qRgba(0, 0, 0, 0);
                 }
             }
         }
@@ -159,14 +160,15 @@ MainWindow::MainWindow(QWidget *parent)
     // apple.png 격자무늬(체커보드) 배경 제거 + 절반 크기
     if (!applePixmap.isNull()) {
         QImage appleImg = applePixmap.toImage().convertToFormat(QImage::Format_ARGB32);
-        for (int py = 0; py < appleImg.height(); ++py) {
-            for (int px = 0; px < appleImg.width(); ++px) {
-                QRgb pixel = appleImg.pixel(px, py);
-                int r = qRed(pixel), g = qGreen(pixel), b = qBlue(pixel);
+        int aw = appleImg.width(), ah = appleImg.height();
+        for (int py = 0; py < ah; ++py) {
+            QRgb *line = reinterpret_cast<QRgb*>(appleImg.scanLine(py));
+            for (int px = 0; px < aw; ++px) {
+                int r = qRed(line[px]), g = qGreen(line[px]), b = qBlue(line[px]);
                 int maxC = qMax(r, qMax(g, b));
                 int minC = qMin(r, qMin(g, b));
                 if ((maxC - minC) < 30 && minC > 170) {
-                    appleImg.setPixel(px, py, qRgba(0, 0, 0, 0));
+                    line[px] = qRgba(0, 0, 0, 0);
                 }
             }
         }
@@ -178,6 +180,62 @@ MainWindow::MainWindow(QWidget *parent)
     treePixmap = QPixmap("images/tree.png");
     bushPixmap = QPixmap("images/bush.png");
     leafPixmap = QPixmap("images/leaf.png");
+
+    // 장애물 이미지에 검정 테두리 추가 (scanLine + distance map 최적화)
+    auto addOutline = [](QPixmap &pm, int thickness = 25) {
+        if (pm.isNull()) return;
+        QImage src = pm.toImage().convertToFormat(QImage::Format_ARGB32);
+        int w = src.width(), h = src.height();
+
+        // 1단계: 불투명 여부 배열 생성
+        QVector<bool> opaque(w * h);
+        for (int y = 0; y < h; ++y) {
+            const QRgb *line = reinterpret_cast<const QRgb*>(src.constScanLine(y));
+            for (int x = 0; x < w; ++x)
+                opaque[y * w + x] = (qAlpha(line[x]) > 10);
+        }
+
+        // 2단계: 거리맵 — 각 픽셀에서 가장 가까운 불투명 픽셀까지의 거리²
+        // 2-pass (행 방향 + 열 방향) Euclidean distance transform 근사
+        const int INF = w * w + h * h;
+        QVector<int> dist(w * h, INF);
+
+        // 불투명 픽셀은 거리 0
+        for (int i = 0; i < w * h; ++i)
+            if (opaque[i]) dist[i] = 0;
+
+        // 좌상→우하 패스
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                int idx = y * w + x;
+                if (x > 0) dist[idx] = qMin(dist[idx], dist[idx - 1] + 1);
+                if (y > 0) dist[idx] = qMin(dist[idx], dist[(y-1) * w + x] + 1);
+            }
+        }
+        // 우하→좌상 패스
+        for (int y = h - 1; y >= 0; --y) {
+            for (int x = w - 1; x >= 0; --x) {
+                int idx = y * w + x;
+                if (x < w - 1) dist[idx] = qMin(dist[idx], dist[idx + 1] + 1);
+                if (y < h - 1) dist[idx] = qMin(dist[idx], dist[(y+1) * w + x] + 1);
+            }
+        }
+
+        // 3단계: 투명이고 거리 <= thickness인 픽셀에 검정 테두리
+        QImage dst = src.copy();
+        for (int y = 0; y < h; ++y) {
+            QRgb *dstLine = reinterpret_cast<QRgb*>(dst.scanLine(y));
+            for (int x = 0; x < w; ++x) {
+                int idx = y * w + x;
+                if (!opaque[idx] && dist[idx] <= thickness)
+                    dstLine[x] = qRgba(0, 0, 0, 220);
+            }
+        }
+        pm = QPixmap::fromImage(dst);
+    };
+    addOutline(treePixmap);
+    addOutline(bushPixmap);
+    addOutline(leafPixmap);
 
     // 좌우 반전 leaf
     if (!leafPixmap.isNull()) {
@@ -702,9 +760,9 @@ void MainWindow::paintEvent(QPaintEvent *event)
     painter.setFont(infoFont);
     if (m_network) {
         painter.setPen(Qt::green);
-        painter.drawText(20, 35, QString("HOST: %1").arg(m_serverScore));
+        painter.drawText(20, 35, QString("Player 1: %1").arg(m_serverScore));
         painter.setPen(QColor(100, 200, 255));
-        painter.drawText(width() / 2 - 80, 35, QString("GUEST: %1").arg(m_clientScore));
+        painter.drawText(20, 65, QString("Player 2: %1").arg(m_clientScore));
     } else {
         painter.setPen(Qt::white);
         painter.drawText(20, 35, QString("Score: %1").arg(score));
@@ -858,8 +916,8 @@ void MainWindow::paintEvent(QPaintEvent *event)
         if (m_network) {
             QString winText;
             QColor  winColor;
-            if      (m_serverScore > m_clientScore) { winText = "HOST WINS!";  winColor = Qt::green; }
-            else if (m_clientScore > m_serverScore) { winText = "GUEST WINS!"; winColor = QColor(100, 200, 255); }
+            if      (m_serverScore > m_clientScore) { winText = "Player 1 WINS!";  winColor = Qt::green; }
+            else if (m_clientScore > m_serverScore) { winText = "Player 2 WINS!"; winColor = QColor(100, 200, 255); }
             else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
             painter.setFont(QFont("Arial", 30, QFont::Bold));
             painter.setPen(winColor);
@@ -867,10 +925,10 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.setFont(QFont("Arial", 22, QFont::Bold));
             painter.setPen(Qt::green);
             painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
-                             QString("HOST: %1").arg(m_serverScore));
+                             QString("Player 1: %1").arg(m_serverScore));
             painter.setPen(QColor(100, 200, 255));
             painter.drawText(rect().adjusted(0, 55, 0, 0), Qt::AlignCenter,
-                             QString("GUEST: %1").arg(m_clientScore));
+                             QString("Player 2: %1").arg(m_clientScore));
         } else {
             painter.setFont(QFont("Arial", 26, QFont::Bold));
             painter.setPen(QColor(255, 220, 50));
@@ -1479,7 +1537,7 @@ void MainWindow::fire()
             }
         }
 
-        if (hitTarget && !isBlockedByWall(aimPos, t.pos)) {
+        if (hitTarget && !isBlockedByWall(aimPos, aimPos)) {
             score += t.points;
             HitInfo hi;
             hi.pos = aimPos;
@@ -1577,7 +1635,7 @@ int MainWindow::processHitForPlayer(QPoint aim, bool isServer)
         for (const QPoint &ofs : offsets) {
             if (pointHitsTarget(t, aim + ofs)) { hit = true; break; }
         }
-        if (hit && !isBlockedByWall(aim, t.pos)) {
+        if (hit && !isBlockedByWall(aim, aim)) {
             bool enemy = t.isEnemy;
             if (isServer) m_serverScore += t.points;
             else          m_clientScore += t.points;
