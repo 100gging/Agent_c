@@ -46,9 +46,6 @@ MainWindow::MainWindow(QWidget *parent)
       score(0),
       gameDurationMs(30000),
       fireEffect(false),
-      hitEffect(false),
-      hitEffectFrames(0),
-      lastHitWasEnemy(false),
       btnStart(nullptr),
       btnNext(nullptr),
       btnRetry(nullptr),
@@ -91,11 +88,48 @@ MainWindow::MainWindow(QWidget *parent)
     howToPlayPage = 0;
     howToPlayDurationMs = 3000;
 
+    // Story images
+    for (int i = 0; i < 5; i++)
+        storyPixmaps[i] = QPixmap(QString(":/images/story%1.png").arg(i + 1));
+    storyPage = 0;
+
     ready1Pixmap = QPixmap(":/images/ready_1.png");
     ready2Pixmap = QPixmap(":/images/ready_2.png");
     ready3Pixmap = QPixmap(":/images/ready_3.png");
     loadingPixmap = QPixmap(":/images/loading.png");
     countdownPage = 0;
+
+    // Effect images (attack, dam_enemy, dam_ally)
+    attackPixmap = QPixmap(":/images/attack.png");
+    damEnemyPixmap = QPixmap(":/images/dam_enemy.png");
+    damAllyPixmap = QPixmap(":/images/dam_ally.png");
+
+    // Remove background from effect images (white/checkerboard AND black)
+    auto removeEffectBg = [](QPixmap &pm) {
+        if (pm.isNull()) return;
+        QImage img = pm.toImage().convertToFormat(QImage::Format_ARGB32);
+        for (int py = 0; py < img.height(); ++py) {
+            for (int px = 0; px < img.width(); ++px) {
+                QRgb pixel = img.pixel(px, py);
+                int r = qRed(pixel), g = qGreen(pixel), b = qBlue(pixel);
+                int maxC = qMax(r, qMax(g, b));
+                int minC = qMin(r, qMin(g, b));
+                // Remove white/light/gray background
+                if ((maxC - minC) < 35 && minC > 140) {
+                    img.setPixel(px, py, qRgba(0, 0, 0, 0));
+                    continue;
+                }
+                // Remove black/dark background
+                if (maxC < 50) {
+                    img.setPixel(px, py, qRgba(0, 0, 0, 0));
+                }
+            }
+        }
+        pm = QPixmap::fromImage(img);
+    };
+    removeEffectBg(attackPixmap);
+    removeEffectBg(damEnemyPixmap);
+    removeEffectBg(damAllyPixmap);
 
     // apple.png 격자무늬(체커보드) 배경 제거 + 절반 크기
     if (!applePixmap.isNull()) {
@@ -524,6 +558,36 @@ void MainWindow::paintEvent(QPaintEvent *event)
         return;
     }
 
+    if (gameState == Story) {
+        // Story images fullscreen
+        const QPixmap &pm = storyPixmaps[storyPage];
+        if (!pm.isNull())
+            painter.drawPixmap(rect(), pm);
+        else
+            painter.fillRect(rect(), QColor(10, 10, 10));
+
+        // Story5 (storyPage==4): show crosshair + START MISSION button
+        if (storyPage == 4) {
+            // Draw START MISSION button (same position as old briefing button)
+            int bw = 280, bh = 70;
+            QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
+            painter.setPen(QPen(Qt::white, 2));
+            painter.setBrush(QColor(180, 30, 30, 220));
+            painter.drawRoundedRect(startBtn, 12, 12);
+            painter.setPen(Qt::white);
+            painter.setFont(QFont("Arial", 22, QFont::Bold));
+            painter.drawText(startBtn, Qt::AlignCenter, "START MISSION");
+
+            // Crosshair
+            painter.setPen(QPen(Qt::green, 3));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(aimPos, aimRadius, aimRadius);
+            painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
+            painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
+        }
+        return;
+    }
+
     if (gameState == HowToPlay) {
         // 플레이 방법 안내 이미지 전체화면 표시
         const QPixmap &pm = (howToPlayPage == 0) ? howToPlay1Pixmap
@@ -533,6 +597,19 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.drawPixmap(rect(), pm);
         else
             painter.fillRect(rect(), QColor(10, 10, 10));
+        return;
+    }
+
+    if (gameState == Loading) {
+        // Loading screen
+        if (!loadingPixmap.isNull())
+            painter.drawPixmap(rect(), loadingPixmap);
+        else {
+            painter.fillRect(rect(), QColor(10, 10, 10));
+            painter.setFont(bigFont);
+            painter.setPen(Qt::white);
+            painter.drawText(rect(), Qt::AlignCenter, "LOADING...");
+        }
         return;
     }
 
@@ -725,21 +802,33 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
     // 발사 효과
     if (fireEffect) {
-        painter.setPen(QPen(Qt::yellow, 4));
-        painter.drawEllipse(aimPos, aimRadius + 10, aimRadius + 10);
-        painter.drawText(aimPos.x() + 25, aimPos.y() - 25, "FIRE!");
+        if (!attackPixmap.isNull()) {
+            int aw = 80;
+            int ah = (int)(80.0 * attackPixmap.height() / qMax(1, attackPixmap.width()));
+            painter.drawPixmap(aimPos.x() - aw / 2, aimPos.y() - ah / 2, aw, ah, attackPixmap);
+        } else {
+            painter.setPen(QPen(Qt::yellow, 4));
+            painter.drawEllipse(aimPos, aimRadius + 10, aimRadius + 10);
+        }
     }
 
-    // 명중 효과
-    if (hitEffect) {
-        painter.setPen(QPen(Qt::white, 5));
-        QColor hc = lastHitWasEnemy ? QColor(255, 200, 0, 160) : QColor(80, 180, 255, 160);
-        painter.setBrush(hc);
-        painter.drawEllipse(aimPos, aimRadius + 20, aimRadius + 20);
-        painter.setPen(lastHitWasEnemy ? Qt::yellow : Qt::cyan);
-        painter.setFont(QFont("Arial", 22, QFont::Bold));
-        painter.drawText(aimPos.x() + 25, aimPos.y() - 30,
-                         lastHitWasEnemy ? "+HIT!" : "-ALLY!");
+    // 명중 효과 (각 히트 위치에 개별 표시)
+    for (const HitInfo &hi : activeHits) {
+        const QPixmap &damPm = hi.isEnemy ? damEnemyPixmap : damAllyPixmap;
+        if (!damPm.isNull()) {
+            int dw = 120;
+            int dh = (int)(120.0 * damPm.height() / qMax(1, damPm.width()));
+            painter.drawPixmap(hi.pos.x() - dw / 2, hi.pos.y() - dh / 2, dw, dh, damPm);
+        } else {
+            painter.setPen(QPen(Qt::white, 5));
+            QColor hc = hi.isEnemy ? QColor(255, 200, 0, 160) : QColor(80, 180, 255, 160);
+            painter.setBrush(hc);
+            painter.drawEllipse(hi.pos, aimRadius + 20, aimRadius + 20);
+            painter.setPen(hi.isEnemy ? Qt::yellow : Qt::cyan);
+            painter.setFont(QFont("Arial", 22, QFont::Bold));
+            painter.drawText(hi.pos.x() + 25, hi.pos.y() - 30,
+                             hi.isEnemy ? "+HIT!" : "-ALLY!");
+        }
     }
 
     // 게임 종료 화면
@@ -781,6 +870,25 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
 void MainWindow::gameLoop()
 {
+    if (gameState == Story) {
+        if (storyPage < 4) {
+            // Auto-advance story1-4 every 3 seconds
+            int elapsed = (int)storyElapsed.elapsed();
+            if (elapsed >= 3000) {
+                storyPage++;
+                storyElapsed.restart();
+            }
+        } else {
+            // Story5: update gyro sensor for crosshair movement
+            m_sensor.update();
+            aimPos.setX(m_sensor.aimX());
+            aimPos.setY(m_sensor.aimY());
+            clampAim();
+        }
+        update();
+        return;
+    }
+
     if (gameState == HowToPlay) {
         int elapsed = (int)howToPlayElapsed.elapsed();
         if (elapsed >= howToPlayDurationMs) {
@@ -789,8 +897,17 @@ void MainWindow::gameLoop()
                 howToPlayDurationMs = 3000;
                 howToPlayElapsed.restart();
             } else {
-                showBriefing();
+                showLoading();
             }
+        }
+        update();
+        return;
+    }
+
+    if (gameState == Loading) {
+        int elapsed = (int)loadingElapsed.elapsed();
+        if (elapsed >= 3000) {
+            showCountdown();
         }
         update();
         return;
@@ -878,9 +995,10 @@ void MainWindow::gameLoop()
     }
 
     // 명중 효과 프레임 감소
-    if (hitEffectFrames > 0) {
-        hitEffectFrames--;
-        hitEffect = (hitEffectFrames > 0);
+    for (int i = activeHits.size() - 1; i >= 0; --i) {
+        activeHits[i].framesLeft--;
+        if (activeHits[i].framesLeft <= 0)
+            activeHits.removeAt(i);
     }
 
     fireEffect = false;
@@ -940,8 +1058,19 @@ void MainWindow::onGpioPressed()
     case Calibrating:
         fire();
         break;
+    case Story:
+        if (storyPage == 4) {
+            // Must shoot the START MISSION button to proceed
+            int bw = 280, bh = 70;
+            QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
+            if (startBtn.contains(aimPos)) {
+                showHowToPlay();
+            }
+        }
+        break;
     case HowToPlay:
     case Countdown:
+    case Loading:
         /* 진행 중 무시 */
         break;
     case Briefing:
@@ -982,7 +1111,7 @@ void MainWindow::onSw3Pressed()
     } else if (gameState == GameOver) {
         gameOverCursor = (gameOverCursor + 1) % 2;
         update();
-    } else if (gameState != GyroCalibrating && gameState != HowToPlay && gameState != Countdown) {
+    } else if (gameState != GyroCalibrating && gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading) {
         // 대부분의 상태에서 설정 진입 가능
         prevState = gameState;
         if (gameState == Playing) {
@@ -1003,6 +1132,15 @@ void MainWindow::startGame()
     enterCalibration();
 }
 
+void MainWindow::showStory()
+{
+    gameState = Story;
+    storyPage = 0;
+    storyElapsed.start();
+    updateButtonLayout();
+    update();
+}
+
 void MainWindow::showHowToPlay()
 {
     gameState = HowToPlay;
@@ -1016,6 +1154,15 @@ void MainWindow::showHowToPlay()
 void MainWindow::showBriefing()
 {
     gameState = Briefing;
+    updateButtonLayout();
+    update();
+}
+
+void MainWindow::showLoading()
+{
+    gameState = Loading;
+    loadingElapsed.start();
+    m_audio->stopBgm();
     updateButtonLayout();
     update();
 }
@@ -1087,7 +1234,7 @@ void MainWindow::fire()
                 }
             }
             if (calBoxHit[0] && calBoxHit[1] && calBoxHit[2]) {
-                showHowToPlay();
+                showStory();
             }
         }
         // update();
@@ -1118,9 +1265,12 @@ void MainWindow::fire()
 
         if (hitTarget && !isBlockedByWall(aimPos, t.pos)) {
             score += t.points;
-            lastHitWasEnemy = t.isEnemy;
-            hitEffect = true;
-            hitEffectFrames = 12;
+            // Record hit at monster's position
+            HitInfo hi;
+            hi.pos = t.pos;
+            hi.isEnemy = t.isEnemy;
+            hi.framesLeft = 12;
+            activeHits.append(hi);
             if (t.isEnemy)
                 m_audio->playSfx("enemy_dead");
             else
@@ -1130,7 +1280,6 @@ void MainWindow::fire()
                 targets[i] = spawnEnemy();
             else
                 targets[i] = spawnAlly();
-            break; // 한 벌 사격에 하나만 명중
         }
     }
 
@@ -1170,9 +1319,7 @@ void MainWindow::resetGame()
     score = 0;
     gameDurationMs = 30000;
     fireEffect = false;
-    hitEffect = false;
-    hitEffectFrames = 0;
-    lastHitWasEnemy = false;
+    activeHits.clear();
     aimPos = centerPos;
     resetTargets();
 }

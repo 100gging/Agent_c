@@ -21,5 +21,14 @@
         <file>images/ready_1.png</file>
         <file>images/ready_2.png</file>
         <file>images/ready_3.png</file>
+        <file>images/story1.png</file>
+        <file>images/story2.png</file>
+        <file>images/story3.png</file>
+        <file>images/story4.png</file>
+        <file>images/story5.png</file>
+        <file>images/attack.png</file>
+        <file>images/dam_enemy.png</file>
+        <file>images/dam_ally.png</file>
+        <file>images/enemy_attack.png</file>
     </qresource>
 </RCC>

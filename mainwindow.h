@@ -54,7 +54,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, GyroCalibrating, Calibrating, HowToPlay, Briefing, Countdown, Playing, GameOver, Settings };
+    enum GameState { Menu, GyroCalibrating, Calibrating, Story, HowToPlay, Briefing, Loading, Countdown, Playing, GameOver, Settings };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -73,7 +73,9 @@ private slots:
     void enterCalibration();
     void showBriefing();
     void showHowToPlay();
+    void showStory();
     void showCountdown();
+    void showLoading();
     void startPlaying();
     void retryGame();
     void goToMainMenu();
@@ -118,6 +120,11 @@ private:
     int     howToPlayDurationMs;
     QElapsedTimer howToPlayElapsed;
 
+    // Story
+    QPixmap storyPixmaps[5];
+    int     storyPage;
+    QElapsedTimer storyElapsed;
+
     // Countdown (ready_3, ready_2, ready_1)
     QPixmap ready1Pixmap;
     QPixmap ready2Pixmap;
@@ -125,6 +132,9 @@ private:
     QPixmap loadingPixmap;
     int     countdownPage;      // 0: ready_3, 1: ready_2, 2: ready_1
     QElapsedTimer countdownElapsed;
+
+    // Loading
+    QElapsedTimer loadingElapsed;
 
     // 장애물: tree x2, bush x2, leaf x3 (leafRects[2]는 좌우반전)
     QPixmap treePixmap;
@@ -145,9 +155,19 @@ private:
     QElapsedTimer gameElapsed;
 
     bool fireEffect;
-    bool hitEffect;
-    int  hitEffectFrames;
-    bool lastHitWasEnemy;
+
+    // Hit effects: multiple simultaneous hits at monster positions
+    struct HitInfo {
+        QPoint pos;       // monster center when hit
+        bool   isEnemy;
+        int    framesLeft;
+    };
+    QVector<HitInfo> activeHits;
+
+    // Effect images
+    QPixmap attackPixmap;
+    QPixmap damEnemyPixmap;
+    QPixmap damAllyPixmap;
 
     bool calBoxHit[3];
     int  calPhase;     // 0: 영점(사과), 1: 3박스 타겟
