@@ -15,6 +15,7 @@
 #include "alsaplayer.h"
 #include "mpu6050sensor.h"
 #include "gpiobutton.h"
+#include "networkmanager.h"
 
 struct Target {
     QPoint pos;
@@ -25,6 +26,13 @@ struct Target {
     bool   isEnemy;
     QString typeName;
     int    dirChangeFrames; // 방향 전환까지 남은 프레임 (지상 유닛용)
+};
+
+// 명중 효과 정보 (각 히트 위치에 개별 표시)
+struct HitInfo {
+    QPoint pos;
+    bool   isEnemy;
+    int    framesLeft;
 };
 
 // 센서 보정용 워커 스레드
@@ -54,7 +62,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, GyroCalibrating, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings };
+    enum GameState { Menu, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -71,13 +79,27 @@ private slots:
     void onSw3Pressed();
     void startGame();
     void enterCalibration();
-    void showHowToPlay();
     void showStory();
-    void showCountdown();
+    void showHowToPlay();
     void showLoading();
+    void showCountdown();
     void retryGame();
     void goToMainMenu();
     void onCalibrationDone();
+
+    // TCP 동기화: 양쪽 모두 GO 수신 시 게임 시작
+    void onSyncGo();
+
+    // TCP 동기화: 연결 끊김 또는 재연결 실패 시 Menu 복귀
+    void onConnectionLost();
+
+    // TCP 게임플레이: 에임/발사/상태 수신
+    void onAimReceived(int x, int y);
+    void onFireReceived();
+    void onStateReceived(const QString &stateData);
+
+public:
+    void setNetworkManager(NetworkManager *nm);
 
 private:
     bool    isBlockedByWall(QPoint from, QPoint to);
@@ -93,6 +115,11 @@ private:
     void    resetTargets();
     void    resetGame();
 
+    // 멀티플레이어 전용
+    int     processHitForPlayer(QPoint aim, bool isServer);
+    QString buildStateString(int hitCode);
+    void    parseStateString(const QString &s);
+
 private:
     QTimer *timer;
     GameState gameState;
@@ -103,10 +130,8 @@ private:
     int aimStep;
     int aimRadius;
 
-    // 타겟 리스트 (1개 적군 + 1개 아군)
     QVector<Target> targets;
 
-    // 프리로드된 모든 픽스맵
     QMap<QString, QPixmap> pixmaps;
     QMap<QString, QImage> spriteMasks;
     QPixmap backgroundPixmap;
@@ -118,23 +143,28 @@ private:
     int     howToPlayDurationMs;
     QElapsedTimer howToPlayElapsed;
 
-    // Story
+    // Story images
     QPixmap storyPixmaps[5];
     int     storyPage;
     QElapsedTimer storyElapsed;
 
-    // Countdown (ready_3, ready_2, ready_1)
+    // Countdown
     QPixmap ready1Pixmap;
     QPixmap ready2Pixmap;
     QPixmap ready3Pixmap;
     QPixmap loadingPixmap;
-    int     countdownPage;      // 0: ready_3, 1: ready_2, 2: ready_1
+    int     countdownPage;
     QElapsedTimer countdownElapsed;
 
-    // Loading
+    // Loading state
     QElapsedTimer loadingElapsed;
 
-    // 장애물: tree x2, bush x2, leaf x3 (leafRects[2]는 좌우반전)
+    // Effect images
+    QPixmap attackPixmap;
+    QPixmap damEnemyPixmap;
+    QPixmap damAllyPixmap;
+
+    // 장애물
     QPixmap treePixmap;
     QPixmap bushPixmap;
     QPixmap leafPixmap;
@@ -153,41 +183,10 @@ private:
     QElapsedTimer gameElapsed;
 
     bool fireEffect;
-
-    // Hit effects: multiple simultaneous hits at monster positions
-    struct HitInfo {
-        QPoint pos;       // monster center when hit
-        bool   isEnemy;
-        int    framesLeft;
-    };
     QVector<HitInfo> activeHits;
 
-    // Effect images
-    QPixmap attackPixmap;
-    QPixmap damEnemyPixmap;
-    QPixmap damAllyPixmap;
-
-    // Blackgatmon boss enemy
-    QPixmap blackgatmonPixmap;
-    QPixmap blackgatmon2Pixmap;
-    QPixmap blackgatmon3Pixmap;
-    QImage  blackgatmonMask;
-    QImage  blackgatmon2Mask;
-    QImage  blackgatmon3Mask;
-    QPixmap enemyAttackPixmap;
-    bool    blackgatmonActive;      // is blackgatmon currently on screen
-    int     blackgatmonSlot;        // 0=left, 1=center, 2=right
-    float   blackgatmonPopY;        // current Y offset for pop-up animation
-    bool    blackgatmonPopped;      // true when fully risen
-    int     blackgatmonPhase;       // 0=blackgatmon.png, 1=blackgatmon2.png, 2=blackgatmon3.png(descend)
-    QElapsedTimer blackgatmonPhaseTimer; // phase duration timer
-    QElapsedTimer blackgatmonSpawnCooldown; // time until next spawn
-    int     blackgatmonNextSpawnMs;  // random cooldown duration
-    bool    enemyAttackActive;      // enemy_attack overlay blocking screen
-    QElapsedTimer enemyAttackTimer; // 2s overlay duration
-
     bool calBoxHit[3];
-    int  calPhase;     // 0: 영점(사과), 1: 3박스 타겟
+    int  calPhase;
 
     QPushButton *btnStart;
     QPushButton *btnRetry;
@@ -195,23 +194,55 @@ private:
 
     MPU6050Sensor m_sensor;
     SensorCalibThread *m_calibThread;
-    GpioButton   *m_gpioBtn;   // BCM4: 발사/선택
-    GpioButton   *m_sw2Btn;    // BCM17: 아래
-    GpioButton   *m_sw3Btn;    // BCM18: 위/설정진입
+    bool m_sensorReady;
+    GpioButton   *m_gpioBtn;
+    GpioButton   *m_sw2Btn;
+    GpioButton   *m_sw3Btn;
 
-    // 게임 오버 커서
-    int  gameOverCursor;       // 0: Retry, 1: Main Menu
-    QElapsedTimer gameOverTimer; // 2초 입력 잠금
+    int  gameOverCursor;
+    QElapsedTimer gameOverTimer;
 
-    // 환경설정
-    int  settingsCursor;       // 0: BGM, 1: SFX, 2: 나가기
-    int  settingsBgmVol;       // 0,25,50,75,100
-    int  settingsSfxVol;       // 0,25,50,75,100
-    GameState prevState;       // 설정 진입 전 상태
-    int  pausedRemainingMs;    // 게임 일시정지 시 남은 시간
+    int  settingsCursor;
+    int  settingsBgmVol;
+    int  settingsSfxVol;
+    GameState prevState;
+    int  pausedRemainingMs;
 
-    // 사운드 (ALSA)
+    // Blackgatmon boss
+    QPixmap blackgatmonPixmap;
+    QPixmap blackgatmon2Pixmap;
+    QPixmap blackgatmon3Pixmap;
+    QImage  blackgatmonMask;
+    QImage  blackgatmon2Mask;
+    QImage  blackgatmon3Mask;
+    bool    blackgatmonActive;
+    int     blackgatmonSlot;
+    float   blackgatmonPopY;
+    bool    blackgatmonPopped;
+    int     blackgatmonPhase;
+    QElapsedTimer blackgatmonPhaseTimer;
+    int     blackgatmonNextSpawnMs;
+    QElapsedTimer blackgatmonSpawnCooldown;
+
+    // Enemy attack overlay
+    QPixmap enemyAttackPixmap;
+    bool    enemyAttackActive;
+    bool    m_serverEnemyAttackOnly; // true when host attack is caused by client killing blackgatmon (client should NOT show)
+    QElapsedTimer enemyAttackTimer;
+
     AlsaPlayer *m_audio;
+
+    NetworkManager *m_network;
+    bool m_waitingForPeer;
+
+    // 멀티플레이어 게임플레이
+    QPoint m_peerAimPos;
+    int    m_serverScore;
+    int    m_clientScore;
+    bool   m_clientFirePending;
+    int    m_pendingHitCode;
+    QVector<Target> m_remoteTargets;
+    int    m_remoteRemainMs;
 };
 
 #endif // MAINWINDOW_H

@@ -1,4 +1,4 @@
-QT       += core gui widgets
+QT       += core gui widgets network
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -15,13 +15,15 @@ SOURCES += \
     mainwindow.cpp \
     mpu6050sensor.cpp \
     gpiobutton.cpp \
-    alsaplayer.cpp
+    alsaplayer.cpp \
+    networkmanager.cpp
 
 HEADERS += \
     mainwindow.h \
     mpu6050sensor.h \
     gpiobutton.h \
-    alsaplayer.h
+    alsaplayer.h \
+    networkmanager.h
 
 RESOURCES += resources.qrc
 

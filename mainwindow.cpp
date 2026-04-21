@@ -33,7 +33,6 @@ static bool isGroundUnit(const QString &name) {
 }
 
 static int randomDirChangeFrames() {
-    // 2~3초 = 66~100 프레임 (30ms 간격)
     return QRandomGenerator::global()->bounded(66, 101);
 }
 
@@ -50,6 +49,14 @@ MainWindow::MainWindow(QWidget *parent)
       btnRetry(nullptr),
       btnMainMenu(nullptr),
       m_calibThread(nullptr),
+      m_sensorReady(false),
+      m_network(nullptr),
+      m_waitingForPeer(false),
+      m_serverScore(0),
+      m_clientScore(0),
+      m_clientFirePending(false),
+      m_pendingHitCode(0),
+      m_remoteRemainMs(30000),
       m_gpioBtn(new GpioButton(4, this)),
       m_sw2Btn(new GpioButton(17, this)),
       m_sw3Btn(new GpioButton(18, this)),
@@ -65,7 +72,8 @@ MainWindow::MainWindow(QWidget *parent)
       blackgatmonPopped(false),
       blackgatmonPhase(0),
       blackgatmonNextSpawnMs(7000),
-      enemyAttackActive(false)
+      enemyAttackActive(false),
+      m_serverEnemyAttackOnly(false)
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -74,7 +82,7 @@ MainWindow::MainWindow(QWidget *parent)
     centerPos = QPoint(width() / 2, height() / 2);
     aimPos = centerPos;
 
-    // 모든 이미지 프리로드
+    // 모든 이미지 프리로드 (runtime loading)
     for (auto &d : ENEMY_DEFS)
         pixmaps[d.name] = QPixmap(QString("images/%1.png").arg(d.name));
     for (auto &d : ALLY_DEFS)
@@ -110,7 +118,7 @@ MainWindow::MainWindow(QWidget *parent)
     damEnemyPixmap = QPixmap("images/dam_enemy.png");
     damAllyPixmap = QPixmap("images/dam_ally.png");
 
-    // Remove background from effect images (white/checkerboard AND black)
+    // Remove background from effect images
     auto removeEffectBg = [](QPixmap &pm) {
         if (pm.isNull()) return;
         QImage img = pm.toImage().convertToFormat(QImage::Format_ARGB32);
@@ -120,12 +128,10 @@ MainWindow::MainWindow(QWidget *parent)
                 int r = qRed(pixel), g = qGreen(pixel), b = qBlue(pixel);
                 int maxC = qMax(r, qMax(g, b));
                 int minC = qMin(r, qMin(g, b));
-                // Remove white/light/gray background
                 if ((maxC - minC) < 35 && minC > 140) {
                     img.setPixel(px, py, qRgba(0, 0, 0, 0));
                     continue;
                 }
-                // Remove black/dark background
                 if (maxC < 50) {
                     img.setPixel(px, py, qRgba(0, 0, 0, 0));
                 }
@@ -159,7 +165,6 @@ MainWindow::MainWindow(QWidget *parent)
                 int r = qRed(pixel), g = qGreen(pixel), b = qBlue(pixel);
                 int maxC = qMax(r, qMax(g, b));
                 int minC = qMin(r, qMin(g, b));
-                // 채도가 낮고 밝은 픽셀 = 체커보드 (회색/흰색)
                 if ((maxC - minC) < 30 && minC > 170) {
                     appleImg.setPixel(px, py, qRgba(0, 0, 0, 0));
                 }
@@ -187,14 +192,14 @@ MainWindow::MainWindow(QWidget *parent)
     if (!leafPixmap.isNull())
         leafMaskImage = leafPixmap.toImage().convertToFormat(QImage::Format_ARGB32);
 
-    // 초기 벽 위치 설정 (resizeEvent 전에 미리)
+    // 초기 벽 위치 설정
     treeRects[0] = QRect(60, 260, 180, 320);
     treeRects[1] = QRect(780, 240, 160, 300);
     bushRects[0] = QRect(744, 230, 200, 140);
     bushRects[1] = QRect(120, 200, 180, 130);
     leafRects[0] = QRect(272, -20, 240, 140);
     leafRects[1] = QRect(500, 30, 200, 130);
-    leafRects[2] = QRect(700, 10, 200, 130);  // 반전 leaf
+    leafRects[2] = QRect(700, 10, 200, 130);
 
     setupUiButtons();
     resetTargets();
@@ -212,18 +217,14 @@ MainWindow::MainWindow(QWidget *parent)
     connect(timer, &QTimer::timeout, this, &MainWindow::gameLoop);
     timer->start(30);
 
-    /* 자이로 센서 화면 크기 설정 */
     m_sensor.setScreenSize(1024, 600);
 
-    /* GPIO 버튼 연결 (BCM4) */
     connect(m_gpioBtn, &GpioButton::pressed, this, &MainWindow::onGpioPressed);
     m_gpioBtn->start(50);
 
-    /* SW2 (BCM17): 아래 */
     connect(m_sw2Btn, &GpioButton::pressed, this, &MainWindow::onSw2Pressed);
     m_sw2Btn->start(50);
 
-    /* SW3 (BCM18): 위/설정진입 */
     connect(m_sw3Btn, &GpioButton::pressed, this, &MainWindow::onSw3Pressed);
     m_sw3Btn->start(50);
 }
@@ -249,20 +250,6 @@ void MainWindow::setupUiButtons()
         "}"
         "QPushButton:pressed {"
         "  background-color: rgba(180, 180, 180, 200);"
-        "  color: black;"
-        "}";
-
-    QString fireStyle =
-        "QPushButton {"
-        "  background-color: rgba(180, 30, 30, 220);"
-        "  color: white;"
-        "  border: 2px solid white;"
-        "  border-radius: 20px;"
-        "  font-size: 26px;"
-        "  font-weight: bold;"
-        "}"
-        "QPushButton:pressed {"
-        "  background-color: rgba(255, 120, 120, 230);"
         "  color: black;"
         "}";
 
@@ -326,7 +313,6 @@ Target MainWindow::spawnEnemy()
     t.isEnemy = true;
     t.typeName = d.name;
     t.dirChangeFrames = randomDirChangeFrames();
-    // 지상 유닛은 하반부에 스폰
     if (isGroundUnit(d.name)) {
         int groundMinY = height() / 2 - 20;
         int groundMaxY = qMax(groundMinY + 1, height() - 140);
@@ -437,24 +423,17 @@ bool MainWindow::pointHitsTarget(const Target &t, const QPoint &p) const
 
 void MainWindow::updateButtonLayout()
 {
-    // 버튼이 아직 생성되지 않은 경우 무시
     if (!btnStart) return;
 
     int w = width();
     int h = height();
 
-    // 기능 버튼
-
-    // Result 버튼
     btnRetry->setGeometry(w / 2 - 220, h / 2 + 80, 200, 70);
     btnMainMenu->setGeometry(w / 2 + 20, h / 2 + 80, 200, 70);
-
-    // 메뉴 버튼
     btnStart->setGeometry(w / 2 - 140, h / 2 + 40, 280, 90);
 
-    // 상태에 따라 버튼 표시/숨김
-    bool isMenu       = (gameState == Menu);
-    bool isGameOver   = (gameState == GameOver);
+    bool isMenu     = (gameState == Menu);
+    bool isGameOver = (gameState == GameOver);
 
     btnStart->setVisible(isMenu);
     btnRetry->setVisible(isGameOver);
@@ -467,14 +446,13 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
     centerPos = QPoint(width() / 2, height() / 2);
 
-    // 장애물 배치: tree x2, bush x2, leaf x3
     treeRects[0] = QRect(90, height() / 2 - 60, 180, 320);
     treeRects[1] = QRect(width() - 220, height() - 310, 160, 300);
     bushRects[0] = QRect(225, height() / 2 + 35, 250, 175);
     bushRects[1] = QRect(width() - 500, height() / 2 - 40, 200, 140);
     leafRects[0] = QRect(width() / 2 - 240, 85, 120, 140);
     leafRects[1] = QRect(width() - 250, 60, 170, 180);
-    leafRects[2] = QRect(width() / 2 - 90, 30, 150, 160);  // 반전 leaf
+    leafRects[2] = QRect(width() / 2 - 90, 30, 150, 160);
     updateButtonLayout();
     clampAim();
 }
@@ -486,7 +464,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    // 외곽선 텍스트 헬퍼: 흰 외곽선 + 검정 본문
+    // 외곽선 텍스트 헬퍼
     auto drawOutlinedText = [&](const QRect &rect, int flags, const QString &text) {
         painter.setPen(QColor(255, 255, 255, 180));
         for (int dx = -1; dx <= 1; dx++)
@@ -524,7 +502,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     if (gameState == Settings) {
-        // 환경설정 화면 - 배경 이미지 + 어두운 오버레이
         if (!backgroundPixmap.isNull())
             painter.drawPixmap(rect(), backgroundPixmap);
         painter.fillRect(rect(), QColor(0, 0, 0, 160));
@@ -550,7 +527,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
             QRect itemRect(width() / 2 - 200, startY + i * lineH, 400, 50);
 
             if (i == settingsCursor) {
-                // 선택된 항목: 하이라이트
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(60, 160, 60, 150));
                 painter.drawRoundedRect(itemRect, 10, 10);
@@ -562,7 +538,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
             }
         }
 
-        // 하단 안내
         painter.setFont(QFont("Arial", 14));
         drawOutlinedText(rect().adjusted(0, 350, 0, 0), Qt::AlignCenter,
                          "SW2: DOWN  |  SW3: UP  |  FIRE: SELECT");
@@ -570,7 +545,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     if (gameState == Story) {
-        // Story images fullscreen
         const QPixmap &pm = storyPixmaps[storyPage];
         if (!pm.isNull())
             painter.drawPixmap(rect(), pm);
@@ -579,7 +553,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
         // Story5 (storyPage==4): show crosshair + START MISSION button
         if (storyPage == 4) {
-            // Draw START MISSION button (same position as old briefing button)
             int bw = 280, bh = 70;
             QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
             painter.setPen(QPen(Qt::white, 2));
@@ -589,18 +562,28 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.setFont(QFont("Arial", 22, QFont::Bold));
             painter.drawText(startBtn, Qt::AlignCenter, "START MISSION");
 
-            // Crosshair
-            painter.setPen(QPen(Qt::green, 3));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawEllipse(aimPos, aimRadius, aimRadius);
-            painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
-            painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
+            // 네트워크 모드에서 상대방 대기 중 표시
+            if (m_waitingForPeer) {
+                painter.setFont(QFont("Arial", 24, QFont::Bold));
+                painter.setPen(QColor(255, 220, 50));
+                painter.drawText(QRect(0, height() - 170, width(), 40), Qt::AlignCenter,
+                                 "Waiting for opponent...");
+            }
+
+            {
+                QColor storyAimColor = (m_network && m_network->role() == NetworkManager::Client)
+                    ? QColor(100, 200, 255) : Qt::green;
+                painter.setPen(QPen(storyAimColor, 3));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawEllipse(aimPos, aimRadius, aimRadius);
+                painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
+                painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
+            }
         }
         return;
     }
 
     if (gameState == HowToPlay) {
-        // 플레이 방법 안내 이미지 전체화면 표시
         const QPixmap &pm = (howToPlayPage == 0) ? howToPlay1Pixmap
                           : (howToPlayPage == 1) ? howToPlay2Pixmap
                           : howToPlay3Pixmap;
@@ -612,7 +595,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     if (gameState == Loading) {
-        // Loading screen
         if (!loadingPixmap.isNull())
             painter.drawPixmap(rect(), loadingPixmap);
         else {
@@ -625,7 +607,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     if (gameState == Countdown) {
-        // ready_3 → ready_2 → ready_1 전체화면 표시
         const QPixmap &pm = (countdownPage == 0) ? ready3Pixmap
                           : (countdownPage == 1) ? ready2Pixmap
                           : ready1Pixmap;
@@ -636,26 +617,20 @@ void MainWindow::paintEvent(QPaintEvent *event)
         return;
     }
 
-    if (gameState == GyroCalibrating) {
-        // 자이로 보정 중 로딩 화면
-        painter.fillRect(rect(), QColor(10, 10, 10));
-        painter.setFont(bigFont);
-        painter.setPen(Qt::white);
-        painter.drawText(rect(), Qt::AlignCenter, "CALIBRATING SENSOR...");
-        return;
-    }
-
     if (gameState == Calibrating) {
-        // 캘리브레이션 화면
         painter.setFont(bigFont);
         painter.setPen(Qt::white);
         painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter, "CALIBRATION");
 
         if (calPhase == 0) {
-            // Phase 0: 영점 조절 — 사과만 보이고 조준선 없음
             painter.setFont(subFont);
-            drawOutlinedText(rect().adjusted(0, 100, 0, 0), Qt::AlignCenter,
-                             "Aim at the apple and press FIRE to zero in");
+            if (!m_sensorReady) {
+                drawOutlinedText(rect().adjusted(0, 100, 0, 0), Qt::AlignCenter,
+                                 "센서 보정 중입니다. 사과를 조준하고 가만히 계세요...");
+            } else {
+                drawOutlinedText(rect().adjusted(0, 100, 0, 0), Qt::AlignCenter,
+                                 "Aim at the apple and press FIRE to zero in");
+            }
 
             QPoint calTarget(width() / 2, height() / 2);
             if (!applePixmap.isNull()) {
@@ -667,9 +642,16 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 painter.setBrush(QColor(200, 40, 40, 120));
                 painter.drawEllipse(calTarget, 30, 30);
             }
-            // 조준선 없음 (영점 전)
+            if (m_sensorReady) {
+                QColor calAimColor = (m_network && m_network->role() == NetworkManager::Client)
+                    ? QColor(100, 200, 255) : Qt::green;
+                painter.setPen(QPen(calAimColor, 3));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawEllipse(aimPos, aimRadius, aimRadius);
+                painter.drawLine(aimPos.x() - 30, aimPos.y(), aimPos.x() + 30, aimPos.y());
+                painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
+            }
         } else {
-            // Phase 1: 3박스 타겟 연습
             painter.setFont(subFont);
             drawOutlinedText(rect().adjusted(0, 60, 0, 0), Qt::AlignCenter,
                              "Shoot all 3 targets to start the mission!");
@@ -701,12 +683,15 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 }
             }
 
-            // 에임 표시 (영점 완료 후 보임)
-            painter.setPen(QPen(Qt::green, 3));
-            painter.setBrush(Qt::NoBrush);
-            painter.drawEllipse(aimPos, aimRadius, aimRadius);
-            painter.drawLine(aimPos.x() - 30, aimPos.y(), aimPos.x() + 30, aimPos.y());
-            painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
+            {
+                QColor calAimColor = (m_network && m_network->role() == NetworkManager::Client)
+                    ? QColor(100, 200, 255) : Qt::green;
+                painter.setPen(QPen(calAimColor, 3));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawEllipse(aimPos, aimRadius, aimRadius);
+                painter.drawLine(aimPos.x() - 30, aimPos.y(), aimPos.x() + 30, aimPos.y());
+                painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
+            }
         }
         return;
     }
@@ -714,17 +699,31 @@ void MainWindow::paintEvent(QPaintEvent *event)
     // --- Playing / GameOver ---
 
     // 상단 정보
-    painter.setPen(Qt::white);
     painter.setFont(infoFont);
-    painter.drawText(20, 35, QString("Score: %1").arg(score));
-    int remainingTimeMs = gameDurationMs - (int)gameElapsed.elapsed();
-    if (remainingTimeMs < 0) remainingTimeMs = 0;
+    if (m_network) {
+        painter.setPen(Qt::green);
+        painter.drawText(20, 35, QString("HOST: %1").arg(m_serverScore));
+        painter.setPen(QColor(100, 200, 255));
+        painter.drawText(width() / 2 - 80, 35, QString("GUEST: %1").arg(m_clientScore));
+    } else {
+        painter.setPen(Qt::white);
+        painter.drawText(20, 35, QString("Score: %1").arg(score));
+    }
+    int remainingTimeMs;
+    if (m_network && m_network->role() == NetworkManager::Client)
+        remainingTimeMs = m_remoteRemainMs;
+    else
+        remainingTimeMs = qMax(0, gameDurationMs - (int)gameElapsed.elapsed());
+    painter.setPen(Qt::white);
     QString timeStr = QString("Time: %1").arg(remainingTimeMs / 1000);
     painter.drawText(width() - 180, 35, timeStr);
 
-    // 1. 타겟을 먼저 그림 (벽 뒤에 숨겨지도록)
+    // 1. 타겟
+    const QVector<Target> &renderTargets =
+        (m_network && m_network->role() == NetworkManager::Client)
+        ? m_remoteTargets : targets;
     if (gameState == Playing || gameState == GameOver) {
-        for (const Target &t : targets) {
+        for (const Target &t : renderTargets) {
             const QPixmap pm = pixmaps.value(t.typeName);
             if (!pm.isNull()) {
                 int d = t.radius * 2;
@@ -741,7 +740,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
         }
     }
 
-    // 2. 장애물을 나중에 그림 (타겟 위에 덮임)
+    // 2. 장애물
     for (int i = 0; i < 2; i++) {
         if (!treePixmap.isNull())
             painter.drawPixmap(treeRects[i], treePixmap);
@@ -771,7 +770,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.drawRect(leafRects[i]);
         }
     }
-    // 반전 leaf (leafRects[2])
     if (!leafFlippedPixmap.isNull())
         painter.drawPixmap(leafRects[2], leafFlippedPixmap);
     else {
@@ -780,12 +778,25 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.drawRect(leafRects[2]);
     }
 
-    // 에임
-    painter.setPen(QPen(Qt::green, 3));
+    // 로컬 에임
+    QColor localAimColor = (m_network && m_network->role() == NetworkManager::Client)
+        ? QColor(100, 200, 255) : Qt::green;
+    painter.setPen(QPen(localAimColor, 3));
     painter.setBrush(Qt::NoBrush);
     painter.drawEllipse(aimPos, aimRadius, aimRadius);
     painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
     painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
+
+    // 상대방 에임 (멀티 모드)
+    if (m_network) {
+        QColor peerAimColor = (m_network->role() == NetworkManager::Client)
+            ? Qt::green : QColor(100, 200, 255);
+        painter.setPen(QPen(peerAimColor, 3));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(m_peerAimPos, aimRadius, aimRadius);
+        painter.drawLine(m_peerAimPos.x() - 25, m_peerAimPos.y(), m_peerAimPos.x() + 25, m_peerAimPos.y());
+        painter.drawLine(m_peerAimPos.x(), m_peerAimPos.y() - 25, m_peerAimPos.x(), m_peerAimPos.y() + 25);
+    }
 
     // 발사 효과
     if (fireEffect) {
@@ -818,7 +829,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
         }
     }
 
-    // Blackgatmon 렌더링 (phase에 따라 다른 이미지)
+    // Blackgatmon 렌더링
     if (blackgatmonActive) {
         int bgSize = 300;
         int slotX;
@@ -842,12 +853,30 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.fillRect(rect(), QColor(0, 0, 0, 180));
         painter.setFont(bigFont);
         painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter,
-                         QString("GAME OVER"));
-        painter.setFont(QFont("Arial", 26, QFont::Bold));
-        painter.setPen(QColor(255, 220, 50));
-        painter.drawText(rect().adjusted(0, -20, 0, 0), Qt::AlignCenter,
-                         QString("Final Score: %1").arg(score));
+        painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter, "GAME OVER");
+
+        if (m_network) {
+            QString winText;
+            QColor  winColor;
+            if      (m_serverScore > m_clientScore) { winText = "HOST WINS!";  winColor = Qt::green; }
+            else if (m_clientScore > m_serverScore) { winText = "GUEST WINS!"; winColor = QColor(100, 200, 255); }
+            else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
+            painter.setFont(QFont("Arial", 30, QFont::Bold));
+            painter.setPen(winColor);
+            painter.drawText(rect().adjusted(0, -30, 0, 0), Qt::AlignCenter, winText);
+            painter.setFont(QFont("Arial", 22, QFont::Bold));
+            painter.setPen(Qt::green);
+            painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
+                             QString("HOST: %1").arg(m_serverScore));
+            painter.setPen(QColor(100, 200, 255));
+            painter.drawText(rect().adjusted(0, 55, 0, 0), Qt::AlignCenter,
+                             QString("GUEST: %1").arg(m_clientScore));
+        } else {
+            painter.setFont(QFont("Arial", 26, QFont::Bold));
+            painter.setPen(QColor(255, 220, 50));
+            painter.drawText(rect().adjusted(0, -20, 0, 0), Qt::AlignCenter,
+                             QString("Final Score: %1").arg(score));
+        }
 
         // GameOver 선택 커서 하이라이트
         QPushButton *goButtons[2] = { btnRetry, btnMainMenu };
@@ -871,6 +900,14 @@ void MainWindow::paintEvent(QPaintEvent *event)
             "}";
         for (int i = 0; i < 2; i++)
             goButtons[i]->setStyleSheet(i == gameOverCursor ? selStyle : normStyle);
+
+        // 네트워크 모드 retry 대기 중 표시
+        if (m_waitingForPeer) {
+            painter.setFont(QFont("Arial", 22, QFont::Bold));
+            painter.setPen(QColor(255, 220, 50));
+            painter.drawText(QRect(0, height() / 2 + 160, width(), 40), Qt::AlignCenter,
+                             "Waiting for opponent...");
+        }
     }
 }
 
@@ -878,14 +915,12 @@ void MainWindow::gameLoop()
 {
     if (gameState == Story) {
         if (storyPage < 4) {
-            // Auto-advance story1-4 every 3 seconds
             int elapsed = (int)storyElapsed.elapsed();
             if (elapsed >= 3000) {
                 storyPage++;
                 storyElapsed.restart();
             }
         } else {
-            // Story5: update gyro sensor for crosshair movement
             m_sensor.update();
             aimPos.setX(m_sensor.aimX());
             aimPos.setY(m_sensor.aimY());
@@ -926,7 +961,6 @@ void MainWindow::gameLoop()
                 countdownPage++;
                 countdownElapsed.restart();
             } else {
-                // 카운트다운 완료 → 게임 시작
                 resetGame();
                 gameState = Playing;
                 gameElapsed.start();
@@ -939,8 +973,7 @@ void MainWindow::gameLoop()
     }
 
     if (gameState != Playing) {
-        if (gameState == Calibrating && calPhase == 1) {
-            /* 캘리브레이션 Phase 1: 센서로 에임 이동 */
+        if (gameState == Calibrating && (calPhase == 0 || calPhase == 1)) {
             m_sensor.update();
             aimPos.setX(m_sensor.aimX());
             aimPos.setY(m_sensor.aimY());
@@ -951,6 +984,29 @@ void MainWindow::gameLoop()
         return;
     }
 
+    // 클라이언트 모드: 에임만 전송
+    if (m_network && m_network->role() == NetworkManager::Client) {
+        m_sensor.update();
+        aimPos.setX(m_sensor.aimX());
+        aimPos.setY(m_sensor.aimY());
+        clampAim();
+        if (m_network->isConnected())
+            m_network->sendAim(aimPos.x(), aimPos.y());
+        for (int i = activeHits.size() - 1; i >= 0; --i) {
+            activeHits[i].framesLeft--;
+            if (activeHits[i].framesLeft <= 0)
+                activeHits.removeAt(i);
+        }
+        // Client-side enemyAttack overlay countdown
+        if (enemyAttackActive && enemyAttackTimer.elapsed() >= 2000) {
+            enemyAttackActive = false;
+        }
+        fireEffect = false;
+        update();
+        return;
+    }
+
+    // 서버 또는 단독 모드
     int remainingMs = gameDurationMs - (int)gameElapsed.elapsed();
     if (remainingMs <= 0) {
         remainingMs = 0;
@@ -959,21 +1015,22 @@ void MainWindow::gameLoop()
         gameOverTimer.restart();
         m_audio->stopBgm();
         updateButtonLayout();
+        if (m_network && m_network->role() == NetworkManager::Server) {
+            m_network->sendState(buildStateString(0));
+        }
     }
 
-    /* 자이로 센서로 에임 이동 */
     m_sensor.update();
     aimPos.setX(m_sensor.aimX());
     aimPos.setY(m_sensor.aimY());
     clampAim();
 
-    // 각 타겟 이동
+    // 타겟 이동
     int margin = 120;
     int minX = margin,     maxX = qMax(minX+1, width()  - margin);
     int minY = 110,        maxY = qMax(minY+1, height() - 120);
 
     for (Target &t : targets) {
-        // 지상 유닛: 방향 전환 타이머
         if (isGroundUnit(t.typeName)) {
             t.dirChangeFrames--;
             if (t.dirChangeFrames <= 0) {
@@ -989,7 +1046,6 @@ void MainWindow::gameLoop()
         if (t.pos.x() < minX) { t.pos.setX(minX); t.speedX = qAbs(t.speedX); }
         if (t.pos.x() > maxX) { t.pos.setX(maxX); t.speedX = -qAbs(t.speedX); }
 
-        // 지상 유닛: Y 범위를 하반부로 제한
         if (isGroundUnit(t.typeName)) {
             int groundMinY = height() / 2 - 20;
             int groundMaxY = qMax(groundMinY + 1, height() - 120);
@@ -1001,6 +1057,18 @@ void MainWindow::gameLoop()
         }
     }
 
+    // 서버 멀티플레이어: 클라이언트 발사 + 상태 전송
+    if (m_network && m_network->role() == NetworkManager::Server && gameState == Playing) {
+        int hitCode = m_pendingHitCode;
+        m_pendingHitCode = 0;
+        if (m_clientFirePending) {
+            m_clientFirePending = false;
+            int ch = processHitForPlayer(m_peerAimPos, false);
+            if (ch != 0) hitCode = ch;
+        }
+        m_network->sendState(buildStateString(hitCode));
+    }
+
     // 명중 효과 프레임 감소
     for (int i = activeHits.size() - 1; i >= 0; --i) {
         activeHits[i].framesLeft--;
@@ -1008,66 +1076,65 @@ void MainWindow::gameLoop()
             activeHits.removeAt(i);
     }
 
-    // --- Blackgatmon logic ---
-    // enemy_attack overlay countdown
-    if (enemyAttackActive) {
-        if (enemyAttackTimer.elapsed() >= 2000) {
-            enemyAttackActive = false;
-            if (!blackgatmonActive) {
-                blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
-                blackgatmonSpawnCooldown.restart();
+    // --- Blackgatmon logic (서버/단독 모드 전용) ---
+    if (!m_network || m_network->role() == NetworkManager::Server) {
+        // enemy_attack overlay countdown
+        if (enemyAttackActive) {
+            if (enemyAttackTimer.elapsed() >= 2000) {
+                enemyAttackActive = false;
+                m_serverEnemyAttackOnly = false;
+                if (!blackgatmonActive) {
+                    blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+                    blackgatmonSpawnCooldown.restart();
+                }
             }
         }
-    }
-    // Blackgatmon active: pop-up animation + phase system
-    if (blackgatmonActive) {
-        int bgSize = 300;
-        float targetY = height() - bgSize + 60;
+        // Blackgatmon active: pop-up animation + phase system
+        if (blackgatmonActive) {
+            int bgSize = 300;
+            float targetY = height() - bgSize + 60;
 
-        if (!blackgatmonPopped) {
-            // Pop-up animation: rise from bottom
-            if (blackgatmonPopY > targetY)
-                blackgatmonPopY -= 16.0f;
-            if (blackgatmonPopY <= targetY) {
-                blackgatmonPopY = targetY;
-                blackgatmonPopped = true;
-                blackgatmonPhase = 0;
-                blackgatmonPhaseTimer.restart();
-            }
-        } else {
-            // Phase 0: blackgatmon.png for 0.5s
-            // Phase 1: blackgatmon2.png for 1.0s
-            if (blackgatmonPhase == 0 && blackgatmonPhaseTimer.elapsed() >= 500) {
-                blackgatmonPhase = 1;
-                blackgatmonPhaseTimer.restart();
-            } else if (blackgatmonPhase == 1 && blackgatmonPhaseTimer.elapsed() >= 1000) {
-                // Phase 2: blackgatmon3.png + 하강 + enemy_attack 동시 시작
-                blackgatmonPhase = 2;
-                blackgatmonPhaseTimer.restart();
-                enemyAttackActive = true;
-                enemyAttackTimer.restart();
-            } else if (blackgatmonPhase == 2) {
-                // 하강 애니메이션
-                blackgatmonPopY += 16.0f;
-                if (blackgatmonPopY >= (float)height()) {
-                    blackgatmonActive = false;
-                    blackgatmonPopped = false;
-                    if (!enemyAttackActive) {
-                        blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
-                        blackgatmonSpawnCooldown.restart();
+            if (!blackgatmonPopped) {
+                if (blackgatmonPopY > targetY)
+                    blackgatmonPopY -= 16.0f;
+                if (blackgatmonPopY <= targetY) {
+                    blackgatmonPopY = targetY;
+                    blackgatmonPopped = true;
+                    blackgatmonPhase = 0;
+                    blackgatmonPhaseTimer.restart();
+                }
+            } else {
+                if (blackgatmonPhase == 0 && blackgatmonPhaseTimer.elapsed() >= 500) {
+                    blackgatmonPhase = 1;
+                    blackgatmonPhaseTimer.restart();
+                } else if (blackgatmonPhase == 1 && blackgatmonPhaseTimer.elapsed() >= 1000) {
+                    blackgatmonPhase = 2;
+                    blackgatmonPhaseTimer.restart();
+                    enemyAttackActive = true;
+                    m_serverEnemyAttackOnly = false; // natural phase2 attack: both players show it
+                    enemyAttackTimer.restart();
+                } else if (blackgatmonPhase == 2) {
+                    blackgatmonPopY += 16.0f;
+                    if (blackgatmonPopY >= (float)height()) {
+                        blackgatmonActive = false;
+                        blackgatmonPopped = false;
+                        if (!enemyAttackActive) {
+                            blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+                            blackgatmonSpawnCooldown.restart();
+                        }
                     }
                 }
             }
         }
-    }
-    // Spawn cooldown: random 5~10s between spawns
-    else if (!enemyAttackActive) {
-        if (blackgatmonSpawnCooldown.elapsed() >= blackgatmonNextSpawnMs) {
-            blackgatmonActive = true;
-            blackgatmonSlot = QRandomGenerator::global()->bounded(3); // 0=left, 1=center, 2=right
-            blackgatmonPopY = (float)height(); // start below screen
-            blackgatmonPopped = false;
-            blackgatmonPhase = 0;
+        // Spawn cooldown
+        else if (!enemyAttackActive) {
+            if (blackgatmonSpawnCooldown.elapsed() >= blackgatmonNextSpawnMs) {
+                blackgatmonActive = true;
+                blackgatmonSlot = QRandomGenerator::global()->bounded(3);
+                blackgatmonPopY = (float)height();
+                blackgatmonPopped = false;
+                blackgatmonPhase = 0;
+            }
         }
     }
 
@@ -1077,27 +1144,18 @@ void MainWindow::gameLoop()
 
 /* ================================================================
    GPIO 버튼 (BCM4) 눌림 처리
-   상태에 따라 다른 동작:
-   - Menu → 게임 시작 (startGame)
-   - Calibrating → fire (영점/타겟)
-   - Playing → fire (총 발사)
-   - GameOver → retryGame
    ================================================================ */
 void MainWindow::onGpioPressed()
 {
     switch (gameState) {
     case Settings:
-        // 설정 창에서 BCM4 = 선택
         if (settingsCursor == 0) {
-            // BGM 볼륨 변경: 0→25→50→75→100→0
             settingsBgmVol = (settingsBgmVol >= 100) ? 0 : settingsBgmVol + 25;
             m_audio->setBgmVolume(settingsBgmVol);
         } else if (settingsCursor == 1) {
-            // SFX 볼륨 변경: 0→25→50→75→100→0
             settingsSfxVol = (settingsSfxVol >= 100) ? 0 : settingsSfxVol + 25;
             m_audio->setSfxVolume(settingsSfxVol);
         } else if (settingsCursor == 2) {
-            // 영점 재보정: 현재 자세를 중앙으로 즉시 설정
             m_sensor.rezero();
             aimPos = QPoint(width() / 2, height() / 2);
             gameState = prevState;
@@ -1107,10 +1165,8 @@ void MainWindow::onGpioPressed()
             }
             updateButtonLayout();
         } else {
-            // 나가기
             gameState = prevState;
             if (prevState == Playing) {
-                // 게임 복귀: 남은 시간으로 재설정
                 gameDurationMs = pausedRemainingMs;
                 gameElapsed.restart();
             }
@@ -1121,19 +1177,23 @@ void MainWindow::onGpioPressed()
     case Menu:
         startGame();
         break;
-    case GyroCalibrating:
-        /* 자이로 보정 중에는 무시 */
-        break;
     case Calibrating:
         fire();
         break;
     case Story:
         if (storyPage == 4) {
-            // Must shoot the START MISSION button to proceed
             int bw = 280, bh = 70;
             QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
             if (startBtn.contains(aimPos)) {
-                showHowToPlay();
+                if (m_network) {
+                    if (!m_waitingForPeer) {
+                        m_waitingForPeer = true;
+                        update();
+                        m_network->sendReady();
+                    }
+                } else {
+                    showHowToPlay();
+                }
             }
         }
         break;
@@ -1155,7 +1215,7 @@ void MainWindow::onGpioPressed()
     }
 }
 
-/* SW2 (BCM17): 설정 창에서 아래로 */
+/* SW2 (BCM17): 아래 */
 void MainWindow::onSw2Pressed()
 {
     if (gameState == Settings) {
@@ -1169,7 +1229,7 @@ void MainWindow::onSw2Pressed()
     }
 }
 
-/* SW3 (BCM18): 설정 창 진입 / 설정 창에서 위로 */
+/* SW3 (BCM18): 위/설정진입 */
 void MainWindow::onSw3Pressed()
 {
     if (gameState == Settings) {
@@ -1180,11 +1240,9 @@ void MainWindow::onSw3Pressed()
         if (gameOverTimer.elapsed() < 2000) return;
         gameOverCursor = (gameOverCursor + 1) % 2;
         update();
-    } else if (gameState != GyroCalibrating && gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading) {
-        // 대부분의 상태에서 설정 진입 가능
+    } else if (gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading) {
         prevState = gameState;
         if (gameState == Playing) {
-            // 게임 일시정지: 남은 시간 저장
             pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
             if (pausedRemainingMs < 0) pausedRemainingMs = 0;
         }
@@ -1195,9 +1253,62 @@ void MainWindow::onSw3Pressed()
     }
 }
 
+// =====================================================================
+// setNetworkManager()
+// =====================================================================
+void MainWindow::setNetworkManager(NetworkManager *nm)
+{
+    m_network = nm;
+    if (!m_network) return;
+
+    m_network->setParent(this);
+
+    connect(m_network, &NetworkManager::syncGo,
+            this,      &MainWindow::onSyncGo);
+    connect(m_network, &NetworkManager::connectionLost,
+            this,      &MainWindow::onConnectionLost);
+    connect(m_network, &NetworkManager::aimReceived,
+            this,      &MainWindow::onAimReceived);
+    connect(m_network, &NetworkManager::fireReceived,
+            this,      &MainWindow::onFireReceived);
+    connect(m_network, &NetworkManager::stateReceived,
+            this,      &MainWindow::onStateReceived);
+
+    m_network->start();
+
+    qDebug() << "[MainWindow] NetworkManager 연결됨. 역할:"
+             << (m_network->role() == NetworkManager::Server ? "Server" : "Client");
+}
+
+// =====================================================================
+// onSyncGo(): 양쪽 모두 READY → GO → 게임 시작
+// =====================================================================
+void MainWindow::onSyncGo()
+{
+    qDebug() << "[MainWindow] syncGo 수신";
+    m_waitingForPeer = false;
+    // GameOver에서 retry한 경우: 바로 카운트다운
+    if (gameState == GameOver) {
+        showCountdown();
+    } else {
+        showHowToPlay();
+    }
+}
+
+// =====================================================================
+// onConnectionLost()
+// =====================================================================
+void MainWindow::onConnectionLost()
+{
+    qDebug() << "[MainWindow] 연결 끊김 → Menu 복귀";
+    m_waitingForPeer = false;
+    gameState = Menu;
+    updateButtonLayout();
+    update();
+}
+
 void MainWindow::startGame()
 {
-    // START 버튼 누르면 캘리브레이션으로
     enterCalibration();
 }
 
@@ -1241,10 +1352,13 @@ void MainWindow::showCountdown()
 
 void MainWindow::enterCalibration()
 {
-    /* 자이로 센서 초기화 + 보정 (별도 스레드) */
-    gameState = GyroCalibrating;
+    m_sensorReady = false;
+    gameState = Calibrating;
+    calPhase = 0;
+    aimPos = QPoint(width() / 2, height() / 2);
+    calBoxHit[0] = calBoxHit[1] = calBoxHit[2] = false;
     updateButtonLayout();
-    repaint();  // 즉시 동기 렌더링 — 깜빡임 방지
+    repaint();
 
     m_calibThread = new SensorCalibThread(&m_sensor, this);
     connect(m_calibThread, &SensorCalibThread::calibrationDone,
@@ -1257,27 +1371,24 @@ void MainWindow::enterCalibration()
 void MainWindow::onCalibrationDone()
 {
     m_calibThread = nullptr;
-    gameState = Calibrating;
-    calPhase = 0;
-    aimPos = QPoint(width() / 2, height() / 2);
-    calBoxHit[0] = calBoxHit[1] = calBoxHit[2] = false;
-    updateButtonLayout();
+    m_sensorReady = true;
     update();
 }
 
 void MainWindow::fire()
 {
     if (gameState == Calibrating) {
+        if (calPhase == 0 && !m_sensorReady)
+            return;
+
         fireEffect = true;
         m_audio->playSfx("fire");
 
         if (calPhase == 0) {
-            // 영점 조절: 현재 aimPos를 centerPos로 저장, 조준선을 화면 중앙으로
             centerPos = aimPos;
             aimPos = QPoint(width() / 2, height() / 2);
             calPhase = 1;
         } else {
-            // 3박스 타겟 히트 체크
             int boxW = 70, boxH = 50;
             QRect calBoxes[3] = {
                 QRect(width() / 4 - boxW / 2, height() - 180, boxW, boxH),
@@ -1294,7 +1405,6 @@ void MainWindow::fire()
                 showStory();
             }
         }
-        // update();
         return;
     }
     if (gameState != Playing) return;
@@ -1305,7 +1415,27 @@ void MainWindow::fire()
     fireEffect = true;
     m_audio->playSfx("fire");
 
-    // Blackgatmon 히트 체크
+    // 멀티플레이어 분기
+    if (m_network) {
+        if (m_network->role() == NetworkManager::Server) {
+            int hitCode = processHitForPlayer(aimPos, true);
+            if (hitCode != 0) {
+                m_pendingHitCode = hitCode;
+                HitInfo hi;
+                hi.pos = aimPos;
+                hi.isEnemy = (hitCode == 1 || hitCode == 5);
+                hi.framesLeft = hi.isEnemy ? 12 : 6;
+                activeHits.append(hi);
+            }
+        } else {
+            if (!enemyAttackActive)
+                m_network->sendFire();
+        }
+        update();
+        return;
+    }
+
+    // Blackgatmon 히트 체크 (단독 모드)
     if (blackgatmonActive) {
         int bgSize = 300;
         int slotX;
@@ -1322,7 +1452,7 @@ void MainWindow::fire()
             HitInfo hi;
             hi.pos = aimPos;
             hi.isEnemy = true;
-            hi.framesLeft = 12;
+            hi.framesLeft = 12; // blackgatmon is enemy, keep 12
             activeHits.append(hi);
             m_audio->playSfx("enemy_dead");
             blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
@@ -1330,6 +1460,7 @@ void MainWindow::fire()
         }
     }
 
+    // 단독 모드: 명중 판정
     static const QPoint hitProbeOffsets[] = {
         QPoint(0, 0),
         QPoint(8, 0), QPoint(-8, 0),
@@ -1350,17 +1481,15 @@ void MainWindow::fire()
 
         if (hitTarget && !isBlockedByWall(aimPos, t.pos)) {
             score += t.points;
-            // Record hit at monster's position
             HitInfo hi;
             hi.pos = aimPos;
             hi.isEnemy = t.isEnemy;
-            hi.framesLeft = 12;
+            hi.framesLeft = t.isEnemy ? 12 : 6;
             activeHits.append(hi);
             if (t.isEnemy)
                 m_audio->playSfx("enemy_dead");
             else
                 m_audio->playSfx("ally_dead");
-            // 해당 타겟을 같은 타입으로 리스폰
             if (t.isEnemy)
                 targets[i] = spawnEnemy();
             else
@@ -1373,17 +1502,217 @@ void MainWindow::fire()
 
 void MainWindow::retryGame()
 {
-    showCountdown();
+    m_waitingForPeer = false;
+    resetGame();
+    if (m_network) {
+        m_network->resetReady();
+        // 네트워크 모드 retry: READY 동기화 후 바로 카운트다운
+        m_waitingForPeer = true;
+        m_network->sendReady();
+        update();
+    } else {
+        showCountdown();
+    }
 }
 
 void MainWindow::goToMainMenu()
 {
+    m_waitingForPeer = false;
+    if (m_network) m_network->resetReady();
     resetGame();
     gameState = Menu;
     centerPos = QPoint(width() / 2, height() / 2);
     aimPos = centerPos;
     m_audio->playBgm("menu");
     updateButtonLayout();
+    update();
+}
+
+// =====================================================================
+// processHitForPlayer(): 명중 판정 (서버 전용)
+// =====================================================================
+int MainWindow::processHitForPlayer(QPoint aim, bool isServer)
+{
+    // Blackgatmon 히트 체크 (멀티플레이어)
+    if (blackgatmonActive) {
+        int bgSize = 300;
+        int slotX;
+        if (blackgatmonSlot == 0)      slotX = width() / 4 - bgSize / 2;
+        else if (blackgatmonSlot == 1)  slotX = width() / 2 - bgSize / 2;
+        else                            slotX = 3 * width() / 4 - bgSize / 2;
+        QRect bgRect(slotX, (int)blackgatmonPopY, bgSize, bgSize);
+        const QImage &mask = (blackgatmonPhase == 2) ? blackgatmon3Mask
+                           : (blackgatmonPhase == 1) ? blackgatmon2Mask
+                           : blackgatmonMask;
+        if (pointHitsOpaquePixel(mask, bgRect, aim)) {
+            blackgatmonActive = false;
+            if (isServer) m_serverScore += 100;
+            else          m_clientScore += 100;
+            m_audio->playSfx("enemy_dead");
+            blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
+            blackgatmonSpawnCooldown.restart();
+            // hitCode 5 = host killed → client gets enemy_attack
+            // hitCode 6 = client killed → host gets enemy_attack
+            if (isServer) {
+                // host killed blackgatmon: host does NOT get enemy_attack, client will
+                return 5;
+            } else {
+                // client killed blackgatmon: host gets enemy_attack (client should NOT)
+                enemyAttackActive = true;
+                m_serverEnemyAttackOnly = true;
+                enemyAttackTimer.restart();
+                return 6;
+            }
+        }
+    }
+
+    static const QPoint offsets[] = {
+        QPoint(0, 0),   QPoint(8, 0),  QPoint(-8, 0),
+        QPoint(0, 8),   QPoint(0, -8), QPoint(6, 6),
+        QPoint(-6, 6),  QPoint(6, -6), QPoint(-6, -6)
+    };
+    for (int i = 0; i < targets.size(); ++i) {
+        Target &t = targets[i];
+        bool hit = false;
+        for (const QPoint &ofs : offsets) {
+            if (pointHitsTarget(t, aim + ofs)) { hit = true; break; }
+        }
+        if (hit && !isBlockedByWall(aim, t.pos)) {
+            bool enemy = t.isEnemy;
+            if (isServer) m_serverScore += t.points;
+            else          m_clientScore += t.points;
+            if (enemy) { m_audio->playSfx("enemy_dead"); targets[i] = spawnEnemy(); }
+            else       { m_audio->playSfx("ally_dead");  targets[i] = spawnAlly(); }
+            return enemy ? (isServer ? 1 : 3) : (isServer ? 2 : 4);
+        }
+    }
+    return 0;
+}
+
+// =====================================================================
+// buildStateString(): 서버 → 클라이언트 STATE 문자열 생성
+// =====================================================================
+QString MainWindow::buildStateString(int hitCode)
+{
+    int remainMs = qMax(0, gameDurationMs - (int)gameElapsed.elapsed());
+    // hitCode 5 = host killed blackgatmon (client gets enemy_attack)
+    // hitCode 6 = client killed blackgatmon (host gets enemy_attack)
+    QString s = QString("%1 %2 %3 %4 %5 %6 %7 %8 %9")
+        .arg(remainMs).arg(m_serverScore).arg(m_clientScore)
+        .arg(aimPos.x()).arg(aimPos.y())
+        .arg(m_peerAimPos.x()).arg(m_peerAimPos.y())
+        .arg(hitCode).arg(targets.size());
+    for (const Target &t : targets)
+        s += QString(" %1 %2 %3 %4 %5")
+            .arg(t.typeName).arg(t.pos.x()).arg(t.pos.y())
+            .arg(t.radius).arg(t.isEnemy ? 1 : 0);
+    // Blackgatmon state: active slot popY popped phase
+    s += QString(" %1 %2 %3 %4 %5")
+        .arg(blackgatmonActive ? 1 : 0)
+        .arg(blackgatmonSlot)
+        .arg((int)blackgatmonPopY)
+        .arg(blackgatmonPopped ? 1 : 0)
+        .arg(blackgatmonPhase);
+    // enemyAttack on client side: only propagate natural phase2 attack (not when caused by client kill)
+    s += QString(" %1").arg((enemyAttackActive && !m_serverEnemyAttackOnly) ? 1 : 0);
+    return s;
+}
+
+// =====================================================================
+// parseStateString(): 클라이언트가 서버 STATE 파싱
+// =====================================================================
+void MainWindow::parseStateString(const QString &s)
+{
+    QStringList p = s.split(' ');
+    int i = 0;
+    if (p.size() < 9) return;
+
+    m_remoteRemainMs = p[i++].toInt();
+    m_serverScore    = p[i++].toInt();
+    m_clientScore    = p[i++].toInt();
+    m_peerAimPos.setX(p[i++].toInt());
+    m_peerAimPos.setY(p[i++].toInt());
+    i++; i++;  // 클라이언트 에임 에코 (로컬 aimPos 사용)
+    int hitCode = p[i++].toInt();
+    int n       = p[i++].toInt();
+
+    // 명중 사운드
+    if      (hitCode == 1 || hitCode == 3 || hitCode == 5 || hitCode == 6) m_audio->playSfx("enemy_dead");
+    else if (hitCode == 2 || hitCode == 4) m_audio->playSfx("ally_dead");
+
+    // 클라이언트가 맞힌 경우: 로컬 에임에 효과 표시
+    if (hitCode == 3 || hitCode == 4 || hitCode == 6) {
+        HitInfo hi;
+        hi.pos = aimPos;
+        hi.isEnemy = (hitCode == 3 || hitCode == 6);
+        hi.framesLeft = hi.isEnemy ? 12 : 6;
+        activeHits.append(hi);
+    }
+
+    // hitCode 5 = host killed blackgatmon → client gets enemy_attack overlay
+    // hitCode 6 = client killed blackgatmon → host gets enemy_attack (handled on server side)
+    if (hitCode == 5) {
+        enemyAttackActive = true;
+        enemyAttackTimer.restart();
+    }
+
+    // 타겟 목록 파싱
+    m_remoteTargets.clear();
+    for (int j = 0; j < n && i + 5 <= p.size(); ++j) {
+        Target t;
+        t.typeName = p[i++];
+        t.pos.setX(p[i++].toInt());
+        t.pos.setY(p[i++].toInt());
+        t.radius   = p[i++].toInt();
+        t.isEnemy  = p[i++].toInt() != 0;
+        t.speedX = t.speedY = t.points = t.dirChangeFrames = 0;
+        m_remoteTargets.append(t);
+    }
+
+    // Blackgatmon state 파싱
+    if (i + 6 <= p.size()) {
+        blackgatmonActive = p[i++].toInt() != 0;
+        blackgatmonSlot   = p[i++].toInt();
+        blackgatmonPopY   = (float)p[i++].toInt();
+        blackgatmonPopped = p[i++].toInt() != 0;
+        blackgatmonPhase  = p[i++].toInt();
+        // enemyAttackActive from server (for non-blackgatmon-kill overlay like phase2 natural attack)
+        // Only set if not already set by hitCode 5
+        bool serverEnemyAttack = p[i++].toInt() != 0;
+        // Client shows enemyAttackActive from hitCode 5 (cross-player) or server's natural phase2 attack
+        // The server's enemyAttackActive is for the server itself; client gets it from hitCode 5
+        // But phase2 natural enemy_attack should also affect client
+        // Actually: server enemyAttackActive means blackgatmon did phase2 attack on BOTH players
+        // so client should show it too
+        if (serverEnemyAttack && !enemyAttackActive) {
+            enemyAttackActive = true;
+            enemyAttackTimer.restart();
+        }
+    }
+
+    // 게임 종료 감지
+    if (m_remoteRemainMs <= 0 && gameState == Playing) {
+        gameState = GameOver;
+        gameOverCursor = 0;
+        gameOverTimer.restart();
+        m_audio->stopBgm();
+        updateButtonLayout();
+    }
+}
+
+void MainWindow::onAimReceived(int x, int y)
+{
+    m_peerAimPos = QPoint(x, y);
+}
+
+void MainWindow::onFireReceived()
+{
+    m_clientFirePending = true;
+}
+
+void MainWindow::onStateReceived(const QString &stateData)
+{
+    parseStateString(stateData);
     update();
 }
 
@@ -1399,6 +1728,7 @@ void MainWindow::clampAim()
     if (aimPos.y() < topBound) aimPos.setY(topBound);
     if (aimPos.y() > bottomBound) aimPos.setY(bottomBound);
 }
+
 void MainWindow::resetGame()
 {
     score = 0;
@@ -1410,6 +1740,12 @@ void MainWindow::resetGame()
     blackgatmonNextSpawnMs = QRandomGenerator::global()->bounded(5000, 10001);
     blackgatmonSpawnCooldown.restart();
     aimPos = centerPos;
+    m_serverScore = 0;
+    m_clientScore = 0;
+    m_clientFirePending = false;
+    m_pendingHitCode = 0;
+    m_remoteRemainMs = 30000;
+    m_remoteTargets.clear();
     resetTargets();
 }
 
