@@ -83,6 +83,8 @@ public:
     void sendPhoto(const QString &filePath);
     /** 서버 → 클라이언트: 협동 랭킹 데이터 전송 */
     void sendCoopRanking(const QString &jsonData);
+    /** 메뉴 복귀 시 BGM 동기화 요청 전송 */
+    void sendMenuBgm();
 
 signals:
     /**
@@ -116,6 +118,8 @@ signals:
     void photoReceived(const QByteArray &jpegData);
     /** 클라이언트가 협동 랭킹 데이터 수신 시 emit */
     void coopRankingReceived(const QString &jsonData);
+    /** BGM 동기 재생 시그널 (양쪽 동시) */
+    void syncBgm();
 
 private slots:
     // [서버 전용] 새 클라이언트 접속 처리
@@ -164,6 +168,8 @@ private:
     static constexpr int MAX_RETRIES = 15;  // 최대 재시도 (15회 × 2초 = 30초)
     bool        m_clientReady;      // 클라이언트 로컬 READY 전송 여부
     bool        m_modeLocked;       // 모드 선착순 잠금 (서버 전용)
+    bool        m_menuBgmLocal;     // 서버 자신이 메뉴 복귀 BGM 대기 중
+    bool        m_menuBgmPeer;      // 클라이언트가 메뉴 복귀 BGM 대기 중
 };
 
 #endif // NETWORKMANAGER_H

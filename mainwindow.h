@@ -105,6 +105,8 @@ private slots:
 
 public:
     void setNetworkManager(NetworkManager *nm);
+    /** 싱글 모드일 때 BGM 즉시 재생 (네트워크 모드는 접속 동기화 후 재생) */
+    void startBgm();
 
 private:
     bool    isBlockedByWall(QPoint from, QPoint to);

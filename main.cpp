@@ -68,6 +68,7 @@ int main(int argc, char *argv[])
     } else {
         // 단독 모드: 네트워크 없이 기존 동작
         qDebug() << "[main] 단독 모드 (네트워크 없음). --server 또는 --client 옵션을 사용하세요.";
+        w.startBgm();  // 싱글 모드: BGM 즉시 재생
     }
 
     w.showFullScreen();   // 전체화면

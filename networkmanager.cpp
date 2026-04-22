@@ -16,7 +16,9 @@ NetworkManager::NetworkManager(Role role, QObject *parent)
       m_retryTimer(nullptr),
       m_retryCount(0),
       m_clientReady(false),
-      m_modeLocked(false)
+      m_modeLocked(false),
+      m_menuBgmLocal(false),
+      m_menuBgmPeer(false)
 {
     if (m_role == Server) {
         // 서버 모드: QTcpServer 생성
@@ -304,6 +306,36 @@ void NetworkManager::processMessages(QTcpSocket *socket, bool isFromClient)
             QString json = msg.mid(9);
             qDebug() << "[Client] 협동 랭킹 데이터 수신";
             emit coopRankingReceived(json);
+
+        } else if (msg == "BGM_SYNC" && isFromClient) {
+            // 서버: 클라이언트가 접속 완료 → 양쪽 BGM 동기 재생
+            qDebug() << "[Server] BGM_SYNC 수신 → GO_BGM 전송";
+            if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+                m_clientSocket->write("GO_BGM\n");
+                m_clientSocket->flush();
+            }
+            emit syncBgm();  // 서버 자신도 재생
+
+        } else if (msg == "GO_BGM" && !isFromClient) {
+            // 클라이언트: 서버로부터 BGM 재생 신호 수신
+            qDebug() << "[Client] GO_BGM 수신 → BGM 재생";
+            emit syncBgm();
+
+        } else if (msg == "MENU_BGM" && isFromClient) {
+            // 서버: 클라이언트가 메뉴에 도착함
+            qDebug() << "[Server] MENU_BGM 수신 (클라이언트 메뉴 도착)";
+            m_menuBgmPeer = true;
+            if (m_menuBgmLocal) {
+                // 서버도 이미 메뉴에 도착 → 양쪽 동시 재생
+                m_menuBgmLocal = false;
+                m_menuBgmPeer = false;
+                if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+                    m_clientSocket->write("GO_BGM\n");
+                    m_clientSocket->flush();
+                }
+                emit syncBgm();
+                qDebug() << "[Server] GO_BGM 전송 (양쪽 메뉴 도착)";
+            }
         }
     }
 }
@@ -368,6 +400,11 @@ void NetworkManager::onConnected()
     // 연결 성공: 재시도 카운터 및 READY 플래그 초기화
     m_retryCount = 0;
     m_clientReady = false;
+
+    // BGM 동기화 요청 전송
+    m_socket->write("BGM_SYNC\n");
+    m_socket->flush();
+    qDebug() << "[Client] BGM_SYNC 전송";
 }
 
 // =====================================================================
@@ -513,5 +550,35 @@ void NetworkManager::sendCoopRanking(const QString &jsonData)
         m_clientSocket->write(("COOPRANK " + jsonData + "\n").toUtf8());
         m_clientSocket->flush();
         qDebug() << "[Server] 협동 랭킹 데이터 전송";
+    }
+}
+
+// =====================================================================
+// sendMenuBgm(): 메뉴 복귀 시 BGM 동기화 요청
+// =====================================================================
+void NetworkManager::sendMenuBgm()
+{
+    if (m_role == Server) {
+        // 서버: 자신이 메뉴에 도착했음을 기록
+        m_menuBgmLocal = true;
+        qDebug() << "[Server] 메뉴 BGM 대기 (local)";
+        if (m_menuBgmPeer) {
+            // 클라이언트도 이미 대기 중 → 양쪽 동시 재생
+            m_menuBgmLocal = false;
+            m_menuBgmPeer = false;
+            if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+                m_clientSocket->write("GO_BGM\n");
+                m_clientSocket->flush();
+            }
+            emit syncBgm();
+            qDebug() << "[Server] GO_BGM 전송 (양쪽 메뉴 도착)";
+        }
+    } else {
+        // 클라이언트: 서버에 MENU_BGM 전송
+        if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+            m_socket->write("MENU_BGM\n");
+            m_socket->flush();
+            qDebug() << "[Client] MENU_BGM 전송";
+        }
     }
 }

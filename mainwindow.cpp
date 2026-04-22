@@ -293,7 +293,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_audio->loadBgm("menu", "sounds/butterfly.wav");
     m_audio->setBgmVolume(100);
     m_audio->loadBgm("game", "sounds/gamebgm.wav");
-    m_audio->playBgm("menu");
+    // BGM은 startBgm()에서 재생 (싱글: 즉시, 멀티: 접속 동기화 후)
 
     connect(timer, &QTimer::timeout, this, &MainWindow::gameLoop);
     timer->start(30);
@@ -590,12 +590,12 @@ void MainWindow::paintEvent(QPaintEvent *event)
             titleFont.setLetterSpacing(QFont::AbsoluteSpacing, 2);
 
             QString title = "FINAL DEFENSE";
-            QRect titleRect = rect().adjusted(0, -80, 0, 0);
-
             QPainterPath path;
             path.addText(0, 0, titleFont, title);
 
             QRectF br = path.boundingRect();
+            QRect titleRect = rect().adjusted(0, -200, 0, 0);
+
             qreal x = titleRect.center().x() - br.width() / 2.0;
             qreal y = titleRect.center().y() + br.height() / 2.0;
 
@@ -2034,10 +2034,25 @@ void MainWindow::setNetworkManager(NetworkManager *nm)
         update();
     });
 
+    // BGM 동기 재생: 접속 완료 후 양쪽 동시 재생
+    connect(m_network, &NetworkManager::syncBgm,
+            this, [this]() {
+        qDebug() << "[MainWindow] syncBgm → menu BGM 재생";
+        m_audio->playBgm("menu");
+    });
+
     m_network->start();
 
     qDebug() << "[MainWindow] NetworkManager 연결됨. 역할:"
              << (m_network->role() == NetworkManager::Server ? "Server" : "Client");
+}
+
+// =====================================================================
+// startBgm(): 싱글 모드 전용 — BGM 즉시 재생
+// =====================================================================
+void MainWindow::startBgm()
+{
+    m_audio->playBgm("menu");
 }
 
 // =====================================================================
@@ -2310,7 +2325,12 @@ void MainWindow::goToMainMenu()
     gameState = Menu;
     centerPos = QPoint(width() / 2, height() / 2);
     aimPos = centerPos;
-    m_audio->playBgm("menu");
+    if (m_network) {
+        // 멀티 모드: 양쪽 메뉴 도착 후 동기 재생
+        m_network->sendMenuBgm();
+    } else {
+        m_audio->playBgm("menu");
+    }
     updateButtonLayout();
     update();
 }
