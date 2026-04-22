@@ -115,6 +115,7 @@ MainWindow::MainWindow(QWidget *parent)
     howToPlay1Pixmap = QPixmap("images/how_to_play1.png");
     howToPlay2Pixmap = QPixmap("images/how_to_play2.png");
     howToPlay3Pixmap = QPixmap("images/how_to_play3.png");
+    howToPlay4Pixmap = QPixmap("images/how_to_play4.png");
     howToPlayPage = 0;
     howToPlayDurationMs = 3000;
 
@@ -910,7 +911,8 @@ void MainWindow::paintEvent(QPaintEvent *event)
     if (gameState == HowToPlay) {
         const QPixmap &pm = (howToPlayPage == 0) ? howToPlay1Pixmap
                           : (howToPlayPage == 1) ? howToPlay2Pixmap
-                          : howToPlay3Pixmap;
+                          : (howToPlayPage == 2) ? howToPlay3Pixmap
+                          : howToPlay4Pixmap;
         if (!pm.isNull())
             painter.drawPixmap(rect(), pm);
         else
@@ -1554,7 +1556,7 @@ void MainWindow::gameLoop()
     if (gameState == HowToPlay) {
         int elapsed = (int)howToPlayElapsed.elapsed();
         if (elapsed >= howToPlayDurationMs) {
-            if (howToPlayPage < 2) {
+            if (howToPlayPage < 3) {
                 howToPlayPage++;
                 howToPlayDurationMs = 3000;
                 howToPlayElapsed.restart();

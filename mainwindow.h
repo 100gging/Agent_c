@@ -144,6 +144,7 @@ private:
     QPixmap howToPlay1Pixmap;
     QPixmap howToPlay2Pixmap;
     QPixmap howToPlay3Pixmap;
+    QPixmap howToPlay4Pixmap;
     int     howToPlayPage;
     int     howToPlayDurationMs;
     QElapsedTimer howToPlayElapsed;
