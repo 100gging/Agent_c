@@ -1,10 +1,14 @@
 #include "mainwindow.h"
 
 #include <QPainter>
+#include <QPainterPath>
+#include <QLinearGradient>
+#include <QGraphicsDropShadowEffect>
 #include <QApplication>
 #include <QRandomGenerator>
 #include <QResizeEvent>
 #include <QFont>
+#include <QFontDatabase>
 #include <QPixmap>
 #include <QLineF>
 #include <QtMath>
@@ -271,6 +275,11 @@ MainWindow::MainWindow(QWidget *parent)
     leafRects[1] = QRect(500, 30, 200, 130);
     leafRects[2] = QRect(700, 10, 200, 130);
 
+    // 한글 폰트 로드
+    QFontDatabase::addApplicationFont("fonts/NanumGothic-Bold.ttf");
+    QFontDatabase::addApplicationFont("fonts/Jua-Regular.ttf");
+    QFontDatabase::addApplicationFont("fonts/stencil.ttf");
+
     setupUiButtons();
     resetTargets();
 
@@ -315,30 +324,40 @@ void MainWindow::setupUiButtons()
 
     QString commonStyle =
         "QPushButton {"
-        "  background-color: rgba(80, 80, 80, 180);"
+        "  background-color: rgba(50, 50, 55, 210);"
         "  color: white;"
-        "  border: 2px solid white;"
-        "  border-radius: 12px;"
+        "  border: 1px solid rgba(255,255,255,70);"
+        "  border-radius: 14px;"
         "  font-size: 20px;"
-        "  font-weight: bold;"
+        "  font-weight: 600;"
         "}"
         "QPushButton:pressed {"
-        "  background-color: rgba(180, 180, 180, 200);"
-        "  color: black;"
+        "  background-color: rgba(85, 85, 95, 220);"
         "}";
 
     QString startStyle =
         "QPushButton {"
-        "  background-color: rgba(30, 130, 30, 220);"
-        "  color: white;"
-        "  border: 2px solid white;"
-        "  border-radius: 20px;"
+        "  color: rgb(255, 240, 200);"
+        "  background-color: rgba(185, 45, 12, 230);"
+        "  border: 2px solid rgba(255, 240, 200, 200);"
+        "  border-radius: 18px;"
+        "  padding: 8px 20px;"
         "  font-size: 28px;"
-        "  font-weight: bold;"
+        "  font-weight: 700;"
+        "  font-family: 'Stencil';"
+        "  letter-spacing: 4px;"
+        "}"
+        "QPushButton:hover {"
+        "  color: rgb(255, 240, 160);"
+        "  background-color: rgba(215, 60, 15, 240);"
+        "  border: 2px solid rgba(255, 240, 200, 230);"
         "}"
         "QPushButton:pressed {"
-        "  background-color: rgba(100, 200, 100, 230);"
-        "  color: black;"
+        "  color: rgb(255, 210, 100);"
+        "  background-color: rgba(120, 20, 5, 245);"
+        "  border: 2px solid rgba(255, 240, 200, 170);"
+        "  padding-top: 14px;"
+        "  padding-bottom: 10px;"
         "}";
 
     btnRetry->setStyleSheet(commonStyle);
@@ -349,6 +368,12 @@ void MainWindow::setupUiButtons()
         btn->setFocusPolicy(Qt::NoFocus);
         btn->setAutoRepeat(false);
     }
+
+    auto *startShadow = new QGraphicsDropShadowEffect(this);
+    startShadow->setBlurRadius(24);
+    startShadow->setOffset(0, 8);
+    startShadow->setColor(QColor(0, 0, 0, 160));
+    btnStart->setGraphicsEffect(startShadow);
 
     connect(btnStart,    &QPushButton::pressed, this, &MainWindow::startGame);
     connect(btnRetry,    &QPushButton::pressed, this, &MainWindow::retryGame);
@@ -504,7 +529,7 @@ void MainWindow::updateButtonLayout()
 
     btnRetry->setGeometry(w / 2 - 220, h / 2 + 80, 200, 70);
     btnMainMenu->setGeometry(w / 2 + 20, h / 2 + 80, 200, 70);
-    btnStart->setGeometry(w / 2 - 140, h / 2 + 40, 280, 90);
+    btnStart->setGeometry(w / 2 - 145, h / 2 + 35, 290, 78);
 
     bool isGameOver = (gameState == GameOver);
 
@@ -559,9 +584,47 @@ void MainWindow::paintEvent(QPaintEvent *event)
     QFont subFont("Arial", 20);
 
     if (gameState == Menu) {
-        painter.setFont(bigFont);
-        painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -120, 0, 0), Qt::AlignCenter, "AGENT C");
+        {
+            QFont titleFont("Stencil", 60, QFont::Bold);
+            titleFont.setLetterSpacing(QFont::AbsoluteSpacing, 2);
+
+            QString title = "FINAL DEFENSE";
+            QRect titleRect = rect().adjusted(0, -80, 0, 0);
+
+            QPainterPath path;
+            path.addText(0, 0, titleFont, title);
+
+            QRectF br = path.boundingRect();
+            qreal x = titleRect.center().x() - br.width() / 2.0;
+            qreal y = titleRect.center().y() + br.height() / 2.0;
+
+            QTransform trans;
+            trans.translate(x, y);
+            QPainterPath titlePath = trans.map(path);
+
+            // 1) 진한 그림자 (2중)
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(0, 0, 0, 120));
+            painter.drawPath(titlePath.translated(6, 6));
+            painter.setBrush(QColor(0, 30, 0, 100));
+            painter.drawPath(titlePath.translated(3, 3));
+
+            // 2) 글자 내부 그라디언트 (군사/디펜스 테마)
+            QLinearGradient grad(titleRect.topLeft(), titleRect.bottomLeft());
+            grad.setColorAt(0.0,  QColor(255, 230, 120));   // 밝은 노랑
+            grad.setColorAt(0.35, QColor(255, 120,  40));   // 주황
+            grad.setColorAt(0.7,  QColor(200,  30,  10));   // 진한 빨강
+            grad.setColorAt(1.0,  QColor(120,   0,   0));   // 다크 레드
+
+            painter.setBrush(grad);
+            painter.setPen(QPen(QColor(30, 0, 0), 7, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPath(titlePath);
+
+            // 3) 밝은 하이라이트 테두리
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(QColor(255, 240, 200), 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPath(titlePath);
+        }
 
         // 메뉴 항목: GAME START, PHOTO, RANKING
         QFont menuFont("Arial", 22, QFont::Bold);
@@ -586,9 +649,18 @@ void MainWindow::paintEvent(QPaintEvent *event)
             }
         }
 
-        painter.setFont(QFont("Arial", 12));
-        drawOutlinedText(QRect(0, height() - 100, width(), 40), Qt::AlignCenter,
-                         "SW2/SW3: SELECT  |  FIRE: CONFIRM");
+        {
+            painter.setFont(QFont("Nanum Gothic", 20, QFont::Normal));
+            QRect hintRect(0, height() - 160, width(), 60);
+            QString hintText = "게임 시작 후 총을 들고 움직이지 마세요";
+            painter.setPen(QColor(255, 240, 200, 180));
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    if (dx || dy)
+                        painter.drawText(hintRect.adjusted(dx, dy, dx, dy), Qt::AlignCenter, hintText);
+            painter.setPen(QColor(30, 0, 0));
+            painter.drawText(hintRect, Qt::AlignCenter, hintText);
+        }
         return;
     }
 
@@ -803,13 +875,15 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
         // Story5 (storyPage==4): show crosshair + START MISSION button
         if (storyPage == 4) {
-            int bw = 280, bh = 70;
-            QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
-            painter.setPen(QPen(Qt::white, 2));
-            painter.setBrush(QColor(180, 30, 30, 220));
-            painter.drawRoundedRect(startBtn, 12, 12);
-            painter.setPen(Qt::white);
-            painter.setFont(QFont("Arial", 22, QFont::Bold));
+            int bw = 380, bh = 78;
+            QRect startBtn(width() / 2 - bw / 2, height() - 100, bw, bh);
+            painter.setPen(QPen(QColor(255, 240, 200, 200), 2));
+            painter.setBrush(QColor(185, 45, 12, 255));
+            painter.drawRoundedRect(startBtn, 18, 18);
+            painter.setPen(QColor(255, 240, 200));
+            QFont storyStartFont("Stencil", 22, QFont::Bold);
+            storyStartFont.setLetterSpacing(QFont::AbsoluteSpacing, 4);
+            painter.setFont(storyStartFont);
             painter.drawText(startBtn, Qt::AlignCenter, "START MISSION");
 
             // 네트워크 모드에서 상대방 대기 중 표시
@@ -868,18 +942,61 @@ void MainWindow::paintEvent(QPaintEvent *event)
     }
 
     if (gameState == Calibrating) {
-        painter.setFont(bigFont);
-        painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter, "CALIBRATION");
+        {
+            QFont calTitleFont("Stencil", 48, QFont::Bold);
+            calTitleFont.setLetterSpacing(QFont::AbsoluteSpacing, 2);
+            QPainterPath calPath;
+            calPath.addText(0, 0, calTitleFont, "CALIBRATION");
+            QRectF cbr = calPath.boundingRect();
+            qreal cx = width() / 2.0 - cbr.width() / 2.0;
+            qreal cy = 80.0 + cbr.height();   // 살짝 위쪽
+            QTransform ct;
+            ct.translate(cx, cy);
+            QPainterPath calTitlePath = ct.map(calPath);
+
+            // 그림자
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(0, 0, 0, 120));
+            painter.drawPath(calTitlePath.translated(5, 5));
+            painter.setBrush(QColor(0, 30, 0, 100));
+            painter.drawPath(calTitlePath.translated(3, 3));
+
+            // 단색 채우기
+            painter.setBrush(QColor(255, 240, 200));
+            painter.setPen(QPen(QColor(30, 0, 0), 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawPath(calTitlePath);
+        }
 
         if (calPhase == 0) {
             painter.setFont(subFont);
             if (!m_sensorReady) {
-                drawOutlinedText(rect().adjusted(0, 100, 0, 0), Qt::AlignCenter,
-                                 "센서 보정 중입니다. 사과를 조준하고 가만히 계세요...");
+                painter.setFont(QFont("Nanum Gothic", 20, QFont::Normal));
+                {
+                    QRect htRect = rect().adjusted(0, 200, 0, 0);
+                    QString htText = "센서 보정 중입니다. 사과를 조준하고 가만히 계세요...";
+                    painter.setPen(QColor(255, 240, 200, 180));
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dy = -1; dy <= 1; dy++)
+                            if (dx || dy)
+                                painter.drawText(htRect.adjusted(dx, dy, dx, dy), Qt::AlignCenter, htText);
+                    painter.setPen(QColor(30, 0, 0));
+                    painter.drawText(htRect, Qt::AlignCenter, htText);
+                }
+                painter.setFont(subFont);
             } else {
-                drawOutlinedText(rect().adjusted(0, 100, 0, 0), Qt::AlignCenter,
-                                 "Aim at the apple and press FIRE to zero in");
+                painter.setFont(QFont("Nanum Gothic", 20, QFont::Normal));
+                {
+                    QRect htRect = rect().adjusted(0, 200, 0, 0);
+                    QString htText = "사과를 쏘세요!";
+                    painter.setPen(QColor(255, 240, 200, 180));
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dy = -1; dy <= 1; dy++)
+                            if (dx || dy)
+                                painter.drawText(htRect.adjusted(dx, dy, dx, dy), Qt::AlignCenter, htText);
+                    painter.setPen(QColor(30, 0, 0));
+                    painter.drawText(htRect, Qt::AlignCenter, htText);
+                }
+                painter.setFont(subFont);
             }
 
             QPoint calTarget(width() / 2, height() / 2);
@@ -902,14 +1019,15 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
             }
         } else {
-            painter.setFont(subFont);
+            painter.setFont(QFont("Nanum Gothic", 22, QFont::Normal));
             drawOutlinedText(rect().adjusted(0, 60, 0, 0), Qt::AlignCenter,
-                             "Shoot all 3 targets to start the mission!");
+                             "3개의 사과를 쏘세요!");
+            painter.setFont(subFont);
 
             int boxW = 70, boxH = 50;
             QRect calBoxes[3] = {
                 QRect(width() / 4 - boxW / 2, height() - 180, boxW, boxH),
-                QRect(width() / 2 - boxW / 2, 120, boxW, boxH),
+                QRect(width() / 2 - boxW / 2, 200, boxW, boxH),
                 QRect(3 * width() / 4 - boxW / 2, height() - 180, boxW, boxH),
             };
 
@@ -1172,9 +1290,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
     // 게임 종료 화면
     if (gameState == GameOver) {
         painter.fillRect(rect(), QColor(0, 0, 0, 180));
-        painter.setFont(bigFont);
-        painter.setPen(Qt::white);
-        painter.drawText(QRect(0, 10, width(), 50), Qt::AlignCenter, "GAME OVER");
 
         // 랭킹 저장 (1회만)
         if (!m_rankingSaved) {
@@ -1208,20 +1323,20 @@ void MainWindow::paintEvent(QPaintEvent *event)
         }
 
         // 점수 표시
-        int scoreAreaY = 60;
         if (m_network) {
             if (m_gameMode == Cooperative) {
                 int teamScore = m_serverScore + m_clientScore;
-                painter.setFont(QFont("Arial", 26, QFont::Bold));
+                painter.setFont(QFont("Arial", 32, QFont::Bold));
                 painter.setPen(QColor(100, 255, 100));
-                painter.drawText(QRect(0, scoreAreaY, width(), 35), Qt::AlignCenter, "MISSION COMPLETE!");
-                painter.setFont(QFont("Arial", 22, QFont::Bold));
+                painter.drawText(QRect(0, 60, width(), 50), Qt::AlignCenter, "MISSION COMPLETE!");
+                painter.setFont(QFont("Arial", 26, QFont::Bold));
                 painter.setPen(QColor(255, 220, 50));
-                painter.drawText(QRect(0, scoreAreaY + 35, width(), 30), Qt::AlignCenter,
+                painter.drawText(QRect(0, 115, width(), 45), Qt::AlignCenter,
                                  QString("TEAM SCORE: %1").arg(teamScore));
             } else {
                 QString winText;
                 QColor  winColor;
+<<<<<<< HEAD
                 QString winnerPhotoPath;
                 if      (m_serverScore > m_clientScore) {
                     winText = "Player 1 WINS!";  winColor = Qt::green;
@@ -1235,14 +1350,20 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 }
                 else { winText = "DRAW!"; winColor = Qt::yellow; }
                 painter.setFont(QFont("Arial", 26, QFont::Bold));
+=======
+                if      (m_serverScore > m_clientScore) { winText = "Player 1 WINS!";  winColor = Qt::green; }
+                else if (m_clientScore > m_serverScore) { winText = "Player 2 WINS!"; winColor = QColor(100, 200, 255); }
+                else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
+                painter.setFont(QFont("Arial", 32, QFont::Bold));
+>>>>>>> befa44f0ff6e5051015b09b2a6123ecd6f67b5eb
                 painter.setPen(winColor);
-                painter.drawText(QRect(0, scoreAreaY, width(), 35), Qt::AlignCenter, winText);
-                painter.setFont(QFont("Arial", 18, QFont::Bold));
+                painter.drawText(QRect(0, 60, width(), 50), Qt::AlignCenter, winText);
+                painter.setFont(QFont("Arial", 24, QFont::Bold));
                 painter.setPen(Qt::green);
-                painter.drawText(QRect(0, scoreAreaY + 35, width(), 25), Qt::AlignCenter,
+                painter.drawText(QRect(0, 115, width(), 45), Qt::AlignCenter,
                                  QString("Player 1: %1").arg(m_serverScore));
                 painter.setPen(QColor(100, 200, 255));
-                painter.drawText(QRect(0, scoreAreaY + 60, width(), 25), Qt::AlignCenter,
+                painter.drawText(QRect(0, 160, width(), 45), Qt::AlignCenter,
                                  QString("Player 2: %1").arg(m_clientScore));
 
                 // 승자 사진 크게 표시
@@ -1261,9 +1382,9 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 }
             }
         } else {
-            painter.setFont(QFont("Arial", 26, QFont::Bold));
+            painter.setFont(QFont("Arial", 28, QFont::Bold));
             painter.setPen(QColor(255, 220, 50));
-            painter.drawText(QRect(0, scoreAreaY, width(), 35), Qt::AlignCenter,
+            painter.drawText(QRect(0, 60, width(), 50), Qt::AlignCenter,
                              QString("Final Score: %1").arg(score));
         }
 
@@ -1271,6 +1392,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
         bool showRanking = true;
         if (m_network && m_gameMode != Cooperative) showRanking = false;
 
+<<<<<<< HEAD
         if (showRanking) {
             QVector<RankingManager::Entry> top3;
             if (m_network && m_gameMode == Cooperative) {
@@ -1279,6 +1401,37 @@ void MainWindow::paintEvent(QPaintEvent *event)
                     top3 = m_ranking->getTop3(RankingManager::Cooperative);
                 else
                     top3 = m_coopRankCache;
+=======
+        int rankStartY = 215;
+        painter.setFont(QFont("Arial", 16, QFont::Bold));
+        painter.setPen(QColor(200, 200, 200));
+        painter.drawText(QRect(0, rankStartY - 25, width(), 20), Qt::AlignCenter, "- TOP 3 -");
+
+        QString medals[] = { "1st", "2nd", "3rd" };
+        QColor medalColors[] = { QColor(255, 215, 0), QColor(192, 192, 192), QColor(205, 127, 50) };
+        int entryH = 45;
+
+        for (int i = 0; i < 3; i++) {
+            int y = rankStartY + i * entryH;
+            painter.setFont(QFont("Arial", 16, QFont::Bold));
+            painter.setPen(medalColors[i]);
+            painter.drawText(QRect(width() / 2 - 160, y, 60, entryH), Qt::AlignVCenter | Qt::AlignRight, medals[i]);
+
+            // 사진 썸네일
+            QRect thumbRect(width() / 2 - 90, y + 4, 36, 36);
+            if (i < top3.size() && !top3[i].photoPath.isEmpty()) {
+                QPixmap pm;
+                if (pm.load(top3[i].photoPath)) {
+                    painter.drawPixmap(thumbRect, pm.scaled(thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                    painter.setPen(QPen(medalColors[i], 2));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawRect(thumbRect);
+                } else {
+                    painter.setPen(QPen(QColor(100, 100, 100), 1));
+                    painter.setBrush(QColor(60, 60, 60, 150));
+                    painter.drawRect(thumbRect);
+                }
+>>>>>>> befa44f0ff6e5051015b09b2a6123ecd6f67b5eb
             } else {
                 top3 = m_ranking->getTop3(RankingManager::Single);
             }
@@ -1683,8 +1836,8 @@ void MainWindow::onGpioPressed()
         break;
     case Story:
         if (storyPage == 4) {
-            int bw = 280, bh = 70;
-            QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
+            int bw = 380, bh = 78;
+            QRect startBtn(width() / 2 - bw / 2, height() - 100, bw, bh);
             if (startBtn.contains(aimPos)) {
                 if (m_network) {
                     showModeSelect();
@@ -2014,7 +2167,7 @@ void MainWindow::fire()
             int boxW = 70, boxH = 50;
             QRect calBoxes[3] = {
                 QRect(width() / 4 - boxW / 2, height() - 180, boxW, boxH),
-                QRect(width() / 2 - boxW / 2, 120, boxW, boxH),
+                QRect(width() / 2 - boxW / 2, 200, boxW, boxH),
                 QRect(3 * width() / 4 - boxW / 2, height() - 180, boxW, boxH),
             };
             for (int i = 0; i < 3; i++) {
