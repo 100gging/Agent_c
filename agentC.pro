@@ -16,14 +16,18 @@ SOURCES += \
     mpu6050sensor.cpp \
     gpiobutton.cpp \
     alsaplayer.cpp \
-    networkmanager.cpp
+    networkmanager.cpp \
+    rankingmanager.cpp \
+    v4l2camera.cpp
 
 HEADERS += \
     mainwindow.h \
     mpu6050sensor.h \
     gpiobutton.h \
     alsaplayer.h \
-    networkmanager.h
+    networkmanager.h \
+    rankingmanager.h \
+    v4l2camera.h
 
 RESOURCES += resources.qrc
 

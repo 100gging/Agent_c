@@ -16,6 +16,8 @@
 #include "mpu6050sensor.h"
 #include "gpiobutton.h"
 #include "networkmanager.h"
+#include "rankingmanager.h"
+#include "v4l2camera.h"
 
 struct Target {
     QPoint pos;
@@ -62,7 +64,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings, ModeSelect };
+    enum GameState { Menu, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings, ModeSelect, Ranking, TakingPhoto };
     enum GameMode  { Solo, Cooperative, Competition };
 
     MainWindow(QWidget *parent = nullptr);
@@ -250,6 +252,17 @@ private:
     // 게임 모드 (멀티플레이어)
     GameMode m_gameMode;
     bool     m_modeLocked;  // 서버 측: 모드 선착순 확정 플래그
+
+    // 랭킹
+    RankingManager *m_ranking;
+    int     m_menuCursor;      // 메뉴 커서: 0=Game Start, 1=Photo, 2=Ranking
+    int     m_rankingTab;      // 랭킹 화면 탭: 0=Single, 1=Competitive, 2=Cooperative
+    bool    m_rankingSaved;    // GameOver에서 이미 저장했는지 플래그
+
+    // 카메라 촬영
+    V4L2Camera m_camera;
+    QPixmap    m_cameraPreview;
+    QString    m_playerPhotoPath;
 };
 
 #endif // MAINWINDOW_H

@@ -8,6 +8,8 @@
 #include <QPixmap>
 #include <QLineF>
 #include <QtMath>
+#include <QDir>
+#include <QDateTime>
 
 static const int BASE_R = 30; // 기본 반지름
 
@@ -75,7 +77,11 @@ MainWindow::MainWindow(QWidget *parent)
       enemyAttackActive(false),
       m_serverEnemyAttackOnly(false),
       m_gameMode(Solo),
-      m_modeLocked(false)
+      m_modeLocked(false),
+      m_ranking(new RankingManager("ranking", this)),
+      m_menuCursor(0),
+      m_rankingTab(0),
+      m_rankingSaved(false)
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -277,6 +283,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(timer, &QTimer::timeout, this, &MainWindow::gameLoop);
     timer->start(30);
+
+    // photos 디렉토리 생성
+    QDir().mkpath("photos");
 
     m_sensor.setScreenSize(1024, 600);
 
@@ -493,10 +502,9 @@ void MainWindow::updateButtonLayout()
     btnMainMenu->setGeometry(w / 2 + 20, h / 2 + 80, 200, 70);
     btnStart->setGeometry(w / 2 - 140, h / 2 + 40, 280, 90);
 
-    bool isMenu     = (gameState == Menu);
     bool isGameOver = (gameState == GameOver);
 
-    btnStart->setVisible(isMenu);
+    btnStart->setVisible(false);  // 메뉴는 이제 커서 기반
     btnRetry->setVisible(isGameOver);
     btnMainMenu->setVisible(isGameOver);
 }
@@ -549,16 +557,34 @@ void MainWindow::paintEvent(QPaintEvent *event)
     if (gameState == Menu) {
         painter.setFont(bigFont);
         painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -80, 0, 0), Qt::AlignCenter, "AGENT C");
+        painter.drawText(rect().adjusted(0, -120, 0, 0), Qt::AlignCenter, "AGENT C");
 
-        painter.setFont(subFont);
-        drawOutlinedText(rect().adjusted(0, 40, 0, 0), Qt::AlignCenter,
-                         "Press BUTTON to begin");
+        // 메뉴 항목: GAME START, PHOTO, RANKING
+        QFont menuFont("Arial", 22, QFont::Bold);
+        painter.setFont(menuFont);
+        int startY = height() / 2 - 50;
+        int lineH = 60;
+        QString menuItems[] = { "GAME START", "PHOTO", "RANKING" };
+        int menuCount = 3;
 
-        painter.setFont(QFont("Arial", 13));
-        drawOutlinedText(QRect(0, height() - 160, width(), 60), Qt::AlignCenter,
-                         "After pressing, hold the gun still and aim at the screen center.\n"
-                         "The sensor will calibrate automatically. (~5 sec)");
+        for (int i = 0; i < menuCount; i++) {
+            QRect itemRect(width() / 2 - 150, startY + i * lineH, 300, 50);
+            if (i == m_menuCursor) {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(60, 160, 60, 180));
+                painter.drawRoundedRect(itemRect, 12, 12);
+                painter.setPen(QColor(100, 255, 100));
+                painter.drawText(itemRect, Qt::AlignCenter, QString("> %1 <").arg(menuItems[i]));
+            } else {
+                painter.setPen(QColor(200, 200, 200));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawText(itemRect, Qt::AlignCenter, menuItems[i]);
+            }
+        }
+
+        painter.setFont(QFont("Arial", 12));
+        drawOutlinedText(QRect(0, height() - 100, width(), 40), Qt::AlignCenter,
+                         "SW2/SW3: SELECT  |  FIRE: CONFIRM");
         return;
     }
 
@@ -602,6 +628,155 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.setFont(QFont("Arial", 14));
         drawOutlinedText(rect().adjusted(0, 350, 0, 0), Qt::AlignCenter,
                          "SW2: DOWN  |  SW3: UP  |  FIRE: SELECT");
+        return;
+    }
+
+    // ── 랭킹 화면 ──
+    if (gameState == Ranking) {
+        if (!backgroundPixmap.isNull())
+            painter.drawPixmap(rect(), backgroundPixmap);
+        painter.fillRect(rect(), QColor(0, 0, 0, 180));
+
+        painter.setFont(bigFont);
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(0, 20, width(), 50), Qt::AlignCenter, "RANKING");
+
+        // 탭 헤더: Single | Competitive | Cooperative
+        QString tabs[] = { "SINGLE", "COMPETITIVE", "COOPERATIVE" };
+        int tabW = 280, tabH = 40;
+        int tabStartX = (width() - tabW * 3 - 20) / 2;
+        painter.setFont(QFont("Arial", 16, QFont::Bold));
+        for (int i = 0; i < 3; i++) {
+            QRect tabRect(tabStartX + i * (tabW + 10), 80, tabW, tabH);
+            if (i == m_rankingTab) {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(60, 160, 60, 200));
+                painter.drawRoundedRect(tabRect, 8, 8);
+                painter.setPen(QColor(100, 255, 100));
+            } else {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(80, 80, 80, 150));
+                painter.drawRoundedRect(tabRect, 8, 8);
+                painter.setPen(QColor(180, 180, 180));
+            }
+            painter.drawText(tabRect, Qt::AlignCenter, tabs[i]);
+        }
+
+        // 랭킹 항목 표시
+        RankingManager::Mode mode = (RankingManager::Mode)m_rankingTab;
+        QVector<RankingManager::Entry> entries = m_ranking->getTop3(mode);
+
+        int entryStartY = 150;
+        int entryH = 120;
+        QString medals[] = { "1st", "2nd", "3rd" };
+        QColor medalColors[] = { QColor(255, 215, 0), QColor(192, 192, 192), QColor(205, 127, 50) };
+
+        for (int i = 0; i < 3; i++) {
+            QRect entryRect(width() / 2 - 350, entryStartY + i * entryH, 700, entryH - 10);
+
+            // 배경
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(40, 40, 40, 180));
+            painter.drawRoundedRect(entryRect, 10, 10);
+
+            // 순위 메달
+            painter.setFont(QFont("Arial", 28, QFont::Bold));
+            painter.setPen(medalColors[i]);
+            painter.drawText(QRect(entryRect.x() + 20, entryRect.y(), 80, entryRect.height()),
+                             Qt::AlignVCenter | Qt::AlignLeft, medals[i]);
+
+            // 사진 표시
+            QRect photoRect(entryRect.x() + 110, entryRect.y() + 10, 80, 80);
+            if (i < entries.size()) {
+                if (mode == RankingManager::Cooperative) {
+                    // 협동 모드: 사진 2개 (좌우)
+                    QRect photo1(entryRect.x() + 110, entryRect.y() + 10, 40, 80);
+                    QRect photo2(entryRect.x() + 152, entryRect.y() + 10, 40, 80);
+                    QPixmap pm1, pm2;
+                    if (!entries[i].photoPath.isEmpty() && pm1.load(entries[i].photoPath)) {
+                        painter.drawPixmap(photo1, pm1.scaled(photo1.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                    } else {
+                        painter.setPen(QPen(QColor(100, 100, 100), 1));
+                        painter.setBrush(QColor(60, 60, 60, 150));
+                        painter.drawRect(photo1);
+                        painter.setFont(QFont("Arial", 8));
+                        painter.setPen(QColor(120, 120, 120));
+                        painter.drawText(photo1, Qt::AlignCenter, "P1");
+                    }
+                    if (!entries[i].photoPath2.isEmpty() && pm2.load(entries[i].photoPath2)) {
+                        painter.drawPixmap(photo2, pm2.scaled(photo2.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                    } else {
+                        painter.setPen(QPen(QColor(100, 100, 100), 1));
+                        painter.setBrush(QColor(60, 60, 60, 150));
+                        painter.drawRect(photo2);
+                        painter.setFont(QFont("Arial", 8));
+                        painter.setPen(QColor(120, 120, 120));
+                        painter.drawText(photo2, Qt::AlignCenter, "P2");
+                    }
+                } else {
+                    QPixmap pm;
+                    if (!entries[i].photoPath.isEmpty() && pm.load(entries[i].photoPath)) {
+                        painter.setPen(QPen(QColor(200, 200, 200), 2));
+                        painter.setBrush(Qt::NoBrush);
+                        painter.drawRect(photoRect);
+                        painter.drawPixmap(photoRect, pm.scaled(photoRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                    } else {
+                        painter.setPen(QPen(QColor(100, 100, 100), 1));
+                        painter.setBrush(QColor(60, 60, 60, 150));
+                        painter.drawRect(photoRect);
+                        painter.setFont(QFont("Arial", 10));
+                        painter.setPen(QColor(120, 120, 120));
+                        painter.drawText(photoRect, Qt::AlignCenter, "PHOTO");
+                    }
+                }
+            } else {
+                painter.setPen(QPen(QColor(100, 100, 100), 1));
+                painter.setBrush(QColor(60, 60, 60, 150));
+                painter.drawRect(photoRect);
+            }
+
+            if (i < entries.size()) {
+                // 점수
+                painter.setFont(QFont("Arial", 32, QFont::Bold));
+                painter.setPen(Qt::white);
+                painter.drawText(QRect(entryRect.x() + 210, entryRect.y(), 300, entryRect.height()),
+                                 Qt::AlignVCenter | Qt::AlignLeft,
+                                 QString::number(entries[i].score));
+            } else {
+                painter.setFont(QFont("Arial", 20));
+                painter.setPen(QColor(100, 100, 100));
+                painter.drawText(QRect(entryRect.x() + 210, entryRect.y(), 300, entryRect.height()),
+                                 Qt::AlignVCenter | Qt::AlignLeft, "---");
+            }
+        }
+
+        painter.setFont(QFont("Arial", 14));
+        drawOutlinedText(QRect(0, height() - 50, width(), 40), Qt::AlignCenter,
+                         "SW2/SW3: CHANGE TAB  |  FIRE: BACK");
+        return;
+    }
+
+    // ── 카메라 촬영 화면 ──
+    if (gameState == TakingPhoto) {
+        painter.fillRect(rect(), Qt::black);
+
+        if (!m_cameraPreview.isNull()) {
+            QPixmap scaled = m_cameraPreview.scaled(
+                width(), height() - 60, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            int px = (width() - scaled.width()) / 2;
+            int py = (height() - 60 - scaled.height()) / 2;
+            painter.drawPixmap(px, py, scaled);
+        } else {
+            painter.setFont(QFont("Arial", 24, QFont::Bold));
+            painter.setPen(QColor(150, 150, 150));
+            painter.drawText(QRect(0, 0, width(), height() - 60), Qt::AlignCenter,
+                             "Camera loading...");
+        }
+
+        painter.setFont(QFont("Arial", 16, QFont::Bold));
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(0, height() - 50, width(), 40), Qt::AlignCenter,
+                         "Press FIRE to take a photo  |  SW3: BACK");
         return;
     }
 
@@ -910,26 +1085,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.drawRect(leafRects[2]);
     }
 
-    // 로컬 에임
-    QColor localAimColor = (m_network && m_network->role() == NetworkManager::Client)
-        ? QColor(100, 200, 255) : Qt::green;
-    painter.setPen(QPen(localAimColor, 3));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawEllipse(aimPos, aimRadius, aimRadius);
-    painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
-    painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
-
-    // 상대방 에임 (멀티 모드)
-    if (m_network) {
-        QColor peerAimColor = (m_network->role() == NetworkManager::Client)
-            ? Qt::green : QColor(100, 200, 255);
-        painter.setPen(QPen(peerAimColor, 3));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(m_peerAimPos, aimRadius, aimRadius);
-        painter.drawLine(m_peerAimPos.x() - 25, m_peerAimPos.y(), m_peerAimPos.x() + 25, m_peerAimPos.y());
-        painter.drawLine(m_peerAimPos.x(), m_peerAimPos.y() - 25, m_peerAimPos.x(), m_peerAimPos.y() + 25);
-    }
-
     // 발사 효과
     if (fireEffect) {
         if (!attackPixmap.isNull()) {
@@ -975,6 +1130,26 @@ void MainWindow::paintEvent(QPaintEvent *event)
             painter.drawPixmap(slotX, (int)blackgatmonPopY, bgSize, bgSize, bgPm);
     }
 
+    // 로컬 에임 (Blackgatmon보다 앞, enemy_attack보다 뒤)
+    QColor localAimColor = (m_network && m_network->role() == NetworkManager::Client)
+        ? QColor(100, 200, 255) : Qt::green;
+    painter.setPen(QPen(localAimColor, 3));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(aimPos, aimRadius, aimRadius);
+    painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
+    painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
+
+    // 상대방 에임 (멀티 모드)
+    if (m_network) {
+        QColor peerAimColor = (m_network->role() == NetworkManager::Client)
+            ? Qt::green : QColor(100, 200, 255);
+        painter.setPen(QPen(peerAimColor, 3));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(m_peerAimPos, aimRadius, aimRadius);
+        painter.drawLine(m_peerAimPos.x() - 25, m_peerAimPos.y(), m_peerAimPos.x() + 25, m_peerAimPos.y());
+        painter.drawLine(m_peerAimPos.x(), m_peerAimPos.y() - 25, m_peerAimPos.x(), m_peerAimPos.y() + 25);
+    }
+
     // enemy_attack 전체 화면 오버레이
     if (enemyAttackActive && !enemyAttackPixmap.isNull()) {
         painter.drawPixmap(rect(), enemyAttackPixmap);
@@ -985,17 +1160,39 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.fillRect(rect(), QColor(0, 0, 0, 180));
         painter.setFont(bigFont);
         painter.setPen(Qt::white);
-        painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter, "GAME OVER");
+        painter.drawText(QRect(0, 10, width(), 50), Qt::AlignCenter, "GAME OVER");
 
+        // 랭킹 저장 (1회만)
+        if (!m_rankingSaved) {
+            m_rankingSaved = true;
+            if (m_network) {
+                if (m_gameMode == Cooperative) {
+                    int teamScore = m_serverScore + m_clientScore;
+                    m_ranking->addScore(RankingManager::Cooperative, teamScore,
+                                        m_playerPhotoPath, m_playerPhotoPath);  // TODO: 상대 사진 경로
+                } else {
+                    // 경쟁: 승자 점수 저장, 동점 시 host를 먼저 저장
+                    if (m_serverScore >= m_clientScore)
+                        m_ranking->addScore(RankingManager::Competitive, m_serverScore, m_playerPhotoPath);
+                    if (m_clientScore >= m_serverScore)
+                        m_ranking->addScore(RankingManager::Competitive, m_clientScore, m_playerPhotoPath);
+                }
+            } else {
+                m_ranking->addScore(RankingManager::Single, score, m_playerPhotoPath);
+            }
+        }
+
+        // 점수 표시
+        int scoreAreaY = 60;
         if (m_network) {
             if (m_gameMode == Cooperative) {
                 int teamScore = m_serverScore + m_clientScore;
-                painter.setFont(QFont("Arial", 30, QFont::Bold));
-                painter.setPen(QColor(100, 255, 100));
-                painter.drawText(rect().adjusted(0, -30, 0, 0), Qt::AlignCenter, "MISSION COMPLETE!");
                 painter.setFont(QFont("Arial", 26, QFont::Bold));
+                painter.setPen(QColor(100, 255, 100));
+                painter.drawText(QRect(0, scoreAreaY, width(), 35), Qt::AlignCenter, "MISSION COMPLETE!");
+                painter.setFont(QFont("Arial", 22, QFont::Bold));
                 painter.setPen(QColor(255, 220, 50));
-                painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
+                painter.drawText(QRect(0, scoreAreaY + 35, width(), 30), Qt::AlignCenter,
                                  QString("TEAM SCORE: %1").arg(teamScore));
             } else {
                 QString winText;
@@ -1003,31 +1200,80 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 if      (m_serverScore > m_clientScore) { winText = "Player 1 WINS!";  winColor = Qt::green; }
                 else if (m_clientScore > m_serverScore) { winText = "Player 2 WINS!"; winColor = QColor(100, 200, 255); }
                 else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
-                painter.setFont(QFont("Arial", 30, QFont::Bold));
+                painter.setFont(QFont("Arial", 26, QFont::Bold));
                 painter.setPen(winColor);
-                painter.drawText(rect().adjusted(0, -30, 0, 0), Qt::AlignCenter, winText);
-                painter.setFont(QFont("Arial", 22, QFont::Bold));
+                painter.drawText(QRect(0, scoreAreaY, width(), 35), Qt::AlignCenter, winText);
+                painter.setFont(QFont("Arial", 18, QFont::Bold));
                 painter.setPen(Qt::green);
-                painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
+                painter.drawText(QRect(0, scoreAreaY + 35, width(), 25), Qt::AlignCenter,
                                  QString("Player 1: %1").arg(m_serverScore));
                 painter.setPen(QColor(100, 200, 255));
-                painter.drawText(rect().adjusted(0, 55, 0, 0), Qt::AlignCenter,
+                painter.drawText(QRect(0, scoreAreaY + 60, width(), 25), Qt::AlignCenter,
                                  QString("Player 2: %1").arg(m_clientScore));
             }
+        } else {
+            painter.setFont(QFont("Arial", 26, QFont::Bold));
+            painter.setPen(QColor(255, 220, 50));
+            painter.drawText(QRect(0, scoreAreaY, width(), 35), Qt::AlignCenter,
+                             QString("Final Score: %1").arg(score));
         }
-        m_sensor.update();  // 카운트다운 동안 센서 유지 → Playing 직전 rezero 정확도 확보
-        aimPos.setX(m_sensor.aimX());
-        aimPos.setY(m_sensor.aimY());
-        clampAim();
-        int elapsed = (int)countdownElapsed.elapsed();
-        if (elapsed >= 1000) {
-            if (countdownPage < 2) {
-                countdownPage++;
-                countdownElapsed.restart();
+
+        // 랭킹 표시 (해당 모드 상위 3명)
+        RankingManager::Mode rankMode = RankingManager::Single;
+        if (m_network) {
+            rankMode = (m_gameMode == Cooperative) ? RankingManager::Cooperative
+                                                    : RankingManager::Competitive;
+        }
+        QVector<RankingManager::Entry> top3 = m_ranking->getTop3(rankMode);
+
+        int rankStartY = scoreAreaY + 105;
+        painter.setFont(QFont("Arial", 16, QFont::Bold));
+        painter.setPen(QColor(200, 200, 200));
+        painter.drawText(QRect(0, rankStartY - 25, width(), 20), Qt::AlignCenter, "- TOP 3 -");
+
+        QString medals[] = { "1st", "2nd", "3rd" };
+        QColor medalColors[] = { QColor(255, 215, 0), QColor(192, 192, 192), QColor(205, 127, 50) };
+        int entryH = 45;
+
+        for (int i = 0; i < 3; i++) {
+            int y = rankStartY + i * entryH;
+            painter.setFont(QFont("Arial", 16, QFont::Bold));
+            painter.setPen(medalColors[i]);
+            painter.drawText(QRect(width() / 2 - 160, y, 60, entryH), Qt::AlignVCenter | Qt::AlignRight, medals[i]);
+
+            // 사진 썸네일
+            QRect thumbRect(width() / 2 - 90, y + 4, 36, 36);
+            if (i < top3.size() && !top3[i].photoPath.isEmpty()) {
+                QPixmap pm;
+                if (pm.load(top3[i].photoPath)) {
+                    painter.drawPixmap(thumbRect, pm.scaled(thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                    painter.setPen(QPen(medalColors[i], 2));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawRect(thumbRect);
+                } else {
+                    painter.setPen(QPen(QColor(100, 100, 100), 1));
+                    painter.setBrush(QColor(60, 60, 60, 150));
+                    painter.drawRect(thumbRect);
+                }
             } else {
-                m_sensor.rezero();  // 현재 조준점을 새 중앙으로 재설정 (드리프트 보정)
+                painter.setPen(QPen(QColor(80, 80, 80), 1));
+                painter.setBrush(QColor(50, 50, 50, 120));
+                painter.drawRect(thumbRect);
+            }
+
+            if (i < top3.size()) {
+                painter.setFont(QFont("Arial", 16, QFont::Bold));
+                painter.setPen(Qt::white);
+                painter.drawText(QRect(width() / 2 - 40, y, 160, entryH),
+                                 Qt::AlignVCenter | Qt::AlignLeft,
+                                 QString::number(top3[i].score));
+            } else {
+                painter.setPen(QColor(100, 100, 100));
+                painter.drawText(QRect(width() / 2 - 40, y, 160, entryH),
+                                 Qt::AlignVCenter | Qt::AlignLeft, "---");
             }
         }
+
         // GameOver 선택 커서 하이라이트
         QPushButton *goButtons[2] = { btnRetry, btnMainMenu };
         QString selStyle =
@@ -1139,6 +1385,15 @@ void MainWindow::gameLoop()
             else
                 m_network->sendServerAim(aimPos.x(), aimPos.y());
         }
+        update();
+        return;
+    }
+
+    // V4L2 카메라 미리보기 갱신
+    if (gameState == TakingPhoto) {
+        QImage frame = m_camera.captureFrame();
+        if (!frame.isNull())
+            m_cameraPreview = QPixmap::fromImage(frame);
         update();
         return;
     }
@@ -1348,7 +1603,22 @@ void MainWindow::onGpioPressed()
         update();
         break;
     case Menu:
-        startGame();
+        if (m_menuCursor == 0) {
+            startGame();
+        } else if (m_menuCursor == 1) {
+            // 카메라 촬영 진입
+            m_cameraPreview = QPixmap();
+            gameState = TakingPhoto;
+            updateButtonLayout();
+            m_camera.open();
+            m_camera.startStreaming();
+            update();
+        } else if (m_menuCursor == 2) {
+            m_rankingTab = 0;
+            gameState = Ranking;
+            updateButtonLayout();
+            update();
+        }
         break;
     case Calibrating:
         fire();
@@ -1405,6 +1675,22 @@ void MainWindow::onGpioPressed()
         else
             goToMainMenu();
         break;
+    case Ranking:
+        gameState = Menu;
+        updateButtonLayout();
+        update();
+        break;
+    case TakingPhoto:
+        // 발사 버튼으로 촬영
+        m_playerPhotoPath = QString("photos/player_%1.jpg")
+            .arg(QDateTime::currentSecsSinceEpoch());
+        m_camera.saveFrame(m_playerPhotoPath);
+        m_camera.stopStreaming();
+        m_camera.close();
+        gameState = Menu;
+        updateButtonLayout();
+        update();
+        break;
     }
 }
 
@@ -1418,6 +1704,12 @@ void MainWindow::onSw2Pressed()
     } else if (gameState == GameOver) {
         if (gameOverTimer.elapsed() < 2000) return;
         gameOverCursor = (gameOverCursor + 1) % 2;
+        update();
+    } else if (gameState == Menu) {
+        m_menuCursor = (m_menuCursor + 1) % 3;
+        update();
+    } else if (gameState == Ranking) {
+        m_rankingTab = (m_rankingTab + 1) % 3;
         update();
     }
 }
@@ -1433,7 +1725,20 @@ void MainWindow::onSw3Pressed()
         if (gameOverTimer.elapsed() < 2000) return;
         gameOverCursor = (gameOverCursor + 1) % 2;
         update();
-    } else if (gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading && gameState != ModeSelect) {
+    } else if (gameState == Menu) {
+        m_menuCursor = (m_menuCursor - 1 + 3) % 3;
+        update();
+    } else if (gameState == Ranking) {
+        m_rankingTab = (m_rankingTab - 1 + 3) % 3;
+        update();
+    } else if (gameState == TakingPhoto) {
+        // 뒤로가기
+        m_camera.stopStreaming();
+        m_camera.close();
+        gameState = Menu;
+        updateButtonLayout();
+        update();
+    } else if (gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading && gameState != ModeSelect && gameState != TakingPhoto) {
         prevState = gameState;
         if (gameState == Playing) {
             pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
@@ -1975,6 +2280,7 @@ void MainWindow::resetGame()
     m_pendingHitCode = 0;
     m_remoteRemainMs = 30000;
     m_remoteTargets.clear();
+    m_rankingSaved = false;
     resetTargets();
 }
 
