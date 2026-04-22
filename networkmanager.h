@@ -78,6 +78,12 @@ public:
     /** 모드 잠금 초기화 (retry 시 호출) */
     void resetModeLock();
 
+    // ── 사진/랭킹 전송 ──
+    /** 클라이언트 → 서버: 촬영한 사진 파일 전송 (base64) */
+    void sendPhoto(const QString &filePath);
+    /** 서버 → 클라이언트: 협동 랭킹 데이터 전송 */
+    void sendCoopRanking(const QString &jsonData);
+
 signals:
     /**
      * @brief 상대방이 READY를 전송했을 때 emit.
@@ -106,6 +112,10 @@ signals:
     void stateReceived(const QString &stateData);
     /** 모드 선택 메시지 수신 시 emit */
     void modeReceived(bool cooperative);
+    /** 서버가 클라이언트 사진 수신 시 emit (base64 디코딩된 JPEG 데이터) */
+    void photoReceived(const QByteArray &jpegData);
+    /** 클라이언트가 협동 랭킹 데이터 수신 시 emit */
+    void coopRankingReceived(const QString &jsonData);
 
 private slots:
     // [서버 전용] 새 클라이언트 접속 처리

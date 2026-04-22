@@ -263,6 +263,8 @@ private:
     V4L2Camera m_camera;
     QPixmap    m_cameraPreview;
     QString    m_playerPhotoPath;
+    QString    m_peerPhotoPath;                        // host: client에서 받은 사진 경로
+    QVector<RankingManager::Entry> m_coopRankCache;    // client: host에서 받은 coop 랭킹
 };
 
 #endif // MAINWINDOW_H

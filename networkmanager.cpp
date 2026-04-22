@@ -1,5 +1,6 @@
 #include "networkmanager.h"
 #include <QDebug>
+#include <QFile>
 
 // =====================================================================
 // 생성자: 역할에 따라 서버/클라이언트 멤버 초기화
@@ -279,6 +280,21 @@ void NetworkManager::processMessages(QTcpSocket *socket, bool isFromClient)
             QStringList parts = msg.split(' ');
             if (parts.size() >= 3)
                 emit aimReceived(parts[1].toInt(), parts[2].toInt());
+
+        } else if (msg.startsWith("PHOTO ") && isFromClient) {
+            // 서버: 클라이언트 사진 수신 (base64)
+            QByteArray b64 = msg.mid(6).toUtf8();
+            QByteArray jpegData = QByteArray::fromBase64(b64);
+            if (!jpegData.isEmpty()) {
+                qDebug() << "[Server] 클라이언트 사진 수신, 크기:" << jpegData.size();
+                emit photoReceived(jpegData);
+            }
+
+        } else if (msg.startsWith("COOPRANK ") && !isFromClient) {
+            // 클라이언트: 협동 랭킹 데이터 수신
+            QString json = msg.mid(9);
+            qDebug() << "[Client] 협동 랭킹 데이터 수신";
+            emit coopRankingReceived(json);
         }
     }
 }
@@ -449,4 +465,36 @@ void NetworkManager::resetModeLock()
 {
     m_modeLocked = false;
     qDebug() << "[NetworkManager] 모드 잠금 초기화됨";
+}
+
+// =====================================================================
+// sendPhoto(): 클라이언트 → 서버: 사진 파일을 base64로 전송
+// =====================================================================
+void NetworkManager::sendPhoto(const QString &filePath)
+{
+    if (m_role != Client) return;
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly)) return;
+    QByteArray data = f.readAll();
+    f.close();
+    if (data.isEmpty()) return;
+    QByteArray b64 = data.toBase64();
+    if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+        m_socket->write("PHOTO " + b64 + "\n");
+        m_socket->flush();
+        qDebug() << "[Client] 사진 전송 완료, 크기:" << data.size() << "bytes";
+    }
+}
+
+// =====================================================================
+// sendCoopRanking(): 서버 → 클라이언트: 협동 랭킹 JSON 데이터 전송
+// =====================================================================
+void NetworkManager::sendCoopRanking(const QString &jsonData)
+{
+    if (m_role != Server) return;
+    if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+        m_clientSocket->write(("COOPRANK " + jsonData + "\n").toUtf8());
+        m_clientSocket->flush();
+        qDebug() << "[Server] 협동 랭킹 데이터 전송";
+    }
 }
