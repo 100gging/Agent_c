@@ -226,7 +226,7 @@ void NetworkManager::processMessages(QTcpSocket *socket, bool isFromClient)
         QString msg = QString::fromUtf8(socket->readLine()).trimmed();
 
         // 빈번한 게임플레이 메시지는 로그 생략
-        if (msg != "FIRE" && !msg.startsWith("AIM ") && !msg.startsWith("STATE "))
+        if (msg != "FIRE" && !msg.startsWith("AIM ") && !msg.startsWith("STATE ") && !msg.startsWith("PHOTO "))
             qDebug() << (isFromClient ? "[Server] 수신:" : "[Client] 수신:") << msg;
 
         if (msg == "READY") {
@@ -287,6 +287,15 @@ void NetworkManager::processMessages(QTcpSocket *socket, bool isFromClient)
             QByteArray jpegData = QByteArray::fromBase64(b64);
             if (!jpegData.isEmpty()) {
                 qDebug() << "[Server] 클라이언트 사진 수신, 크기:" << jpegData.size();
+                emit photoReceived(jpegData);
+            }
+
+        } else if (msg.startsWith("PHOTO ") && !isFromClient) {
+            // 클라이언트: 서버 사진 수신 (base64)
+            QByteArray b64 = msg.mid(6).toUtf8();
+            QByteArray jpegData = QByteArray::fromBase64(b64);
+            if (!jpegData.isEmpty()) {
+                qDebug() << "[Client] 서버 사진 수신, 크기:" << jpegData.size();
                 emit photoReceived(jpegData);
             }
 
@@ -468,21 +477,29 @@ void NetworkManager::resetModeLock()
 }
 
 // =====================================================================
-// sendPhoto(): 클라이언트 → 서버: 사진 파일을 base64로 전송
+// sendPhoto(): 상대에게 사진 파일 전송 (base64) — 양방향
 // =====================================================================
 void NetworkManager::sendPhoto(const QString &filePath)
 {
-    if (m_role != Client) return;
     QFile f(filePath);
     if (!f.open(QIODevice::ReadOnly)) return;
     QByteArray data = f.readAll();
     f.close();
     if (data.isEmpty()) return;
     QByteArray b64 = data.toBase64();
-    if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
-        m_socket->write("PHOTO " + b64 + "\n");
-        m_socket->flush();
-        qDebug() << "[Client] 사진 전송 완료, 크기:" << data.size() << "bytes";
+
+    if (m_role == Client) {
+        if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+            m_socket->write("PHOTO " + b64 + "\n");
+            m_socket->flush();
+            qDebug() << "[Client] 사진 전송 완료, 크기:" << data.size() << "bytes";
+        }
+    } else {
+        if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+            m_clientSocket->write("PHOTO " + b64 + "\n");
+            m_clientSocket->flush();
+            qDebug() << "[Server] 사진 전송 완료, 크기:" << data.size() << "bytes";
+        }
     }
 }
 

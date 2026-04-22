@@ -79,7 +79,7 @@ public:
     void resetModeLock();
 
     // ── 사진/랭킹 전송 ──
-    /** 클라이언트 → 서버: 촬영한 사진 파일 전송 (base64) */
+    /** 상대에게 촬영한 사진 파일 전송 (base64) — 서버/클라이언트 양방향 */
     void sendPhoto(const QString &filePath);
     /** 서버 → 클라이언트: 협동 랭킹 데이터 전송 */
     void sendCoopRanking(const QString &jsonData);

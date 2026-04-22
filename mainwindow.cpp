@@ -1413,23 +1413,56 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 painter.drawText(QRect(width() / 2 - 160, y, 60, entryH), Qt::AlignVCenter | Qt::AlignRight, medals[i]);
 
                 // 사진 썸네일
-                QRect thumbRect(width() / 2 - 90, y + 4, 36, 36);
-                if (i < top3.size() && !top3[i].photoPath.isEmpty()) {
-                    QPixmap pm;
-                    if (pm.load(top3[i].photoPath)) {
-                        painter.drawPixmap(thumbRect, pm.scaled(thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
-                        painter.setPen(QPen(medalColors[i], 2));
+                if (i < top3.size() && m_network && m_gameMode == Cooperative) {
+                    // 협동 모드: 사진 2개 (좌우)
+                    QRect photo1(width() / 2 - 90, y + 4, 18, 36);
+                    QRect photo2(width() / 2 - 72, y + 4, 18, 36);
+                    QPixmap pm1, pm2;
+                    if (!top3[i].photoPath.isEmpty() && pm1.load(top3[i].photoPath)) {
+                        painter.drawPixmap(photo1, pm1.scaled(photo1.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                        painter.setPen(QPen(medalColors[i], 1));
                         painter.setBrush(Qt::NoBrush);
-                        painter.drawRect(thumbRect);
+                        painter.drawRect(photo1);
                     } else {
                         painter.setPen(QPen(QColor(100, 100, 100), 1));
                         painter.setBrush(QColor(60, 60, 60, 150));
-                        painter.drawRect(thumbRect);
+                        painter.drawRect(photo1);
+                        painter.setFont(QFont("Arial", 6));
+                        painter.setPen(QColor(120, 120, 120));
+                        painter.drawText(photo1, Qt::AlignCenter, "P1");
+                    }
+                    if (!top3[i].photoPath2.isEmpty() && pm2.load(top3[i].photoPath2)) {
+                        painter.drawPixmap(photo2, pm2.scaled(photo2.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                        painter.setPen(QPen(medalColors[i], 1));
+                        painter.setBrush(Qt::NoBrush);
+                        painter.drawRect(photo2);
+                    } else {
+                        painter.setPen(QPen(QColor(100, 100, 100), 1));
+                        painter.setBrush(QColor(60, 60, 60, 150));
+                        painter.drawRect(photo2);
+                        painter.setFont(QFont("Arial", 6));
+                        painter.setPen(QColor(120, 120, 120));
+                        painter.drawText(photo2, Qt::AlignCenter, "P2");
                     }
                 } else {
-                    painter.setPen(QPen(QColor(80, 80, 80), 1));
-                    painter.setBrush(QColor(50, 50, 50, 120));
-                    painter.drawRect(thumbRect);
+                    QRect thumbRect(width() / 2 - 90, y + 4, 36, 36);
+                    if (i < top3.size() && !top3[i].photoPath.isEmpty()) {
+                        QPixmap pm;
+                        if (pm.load(top3[i].photoPath)) {
+                            painter.drawPixmap(thumbRect, pm.scaled(thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                            painter.setPen(QPen(medalColors[i], 2));
+                            painter.setBrush(Qt::NoBrush);
+                            painter.drawRect(thumbRect);
+                        } else {
+                            painter.setPen(QPen(QColor(100, 100, 100), 1));
+                            painter.setBrush(QColor(60, 60, 60, 150));
+                            painter.drawRect(thumbRect);
+                        }
+                    } else {
+                        painter.setPen(QPen(QColor(80, 80, 80), 1));
+                        painter.setBrush(QColor(50, 50, 50, 120));
+                        painter.drawRect(thumbRect);
+                    }
                 }
 
                 if (i < top3.size()) {
@@ -1859,8 +1892,8 @@ void MainWindow::onGpioPressed()
         m_camera.saveFrame(m_playerPhotoPath);
         m_camera.stopStreaming();
         m_camera.close();
-        // 클라이언트: 사진을 서버로 전송
-        if (m_network && m_network->role() == NetworkManager::Client)
+        // 클라이언트: 사진을 서버로 전송 / 서버: 사진을 클라이언트로 전송
+        if (m_network)
             m_network->sendPhoto(m_playerPhotoPath);
         gameState = Menu;
         updateButtonLayout();
@@ -1949,17 +1982,18 @@ void MainWindow::setNetworkManager(NetworkManager *nm)
     connect(m_network, &NetworkManager::modeReceived,
             this,      &MainWindow::onModeReceived);
 
-    // 서버: 클라이언트 사진 수신 처리
+    // 상대 사진 수신 처리 (서버←클라이언트, 클라이언트←서버 양방향)
     connect(m_network, &NetworkManager::photoReceived,
             this, [this](const QByteArray &jpegData) {
-        m_peerPhotoPath = QString("photos/client_%1.jpg")
-            .arg(QDateTime::currentSecsSinceEpoch());
+        QString prefix = (m_network->role() == NetworkManager::Server) ? "client" : "server";
+        m_peerPhotoPath = QString("photos/%1_%2.jpg")
+            .arg(prefix).arg(QDateTime::currentSecsSinceEpoch());
         QDir().mkpath("photos");
         QFile f(m_peerPhotoPath);
         if (f.open(QIODevice::WriteOnly)) {
             f.write(jpegData);
             f.close();
-            qDebug() << "[MainWindow] 클라이언트 사진 저장:" << m_peerPhotoPath;
+            qDebug() << "[MainWindow] 상대 사진 저장:" << m_peerPhotoPath;
         }
     });
 
