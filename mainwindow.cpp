@@ -29,7 +29,7 @@ static const EnemyDef ALLY_DEFS[] = {
 
 static bool isGroundUnit(const QString &name) {
     return name == "agumon" || name == "dongulmon" || name == "metamon"
-        || name == "oogamon" || name == "raremon";
+        || name == "oogamon" || name == "raremon" || name == "gajimon";
 }
 
 static int randomDirChangeFrames() {
@@ -253,8 +253,8 @@ MainWindow::MainWindow(QWidget *parent)
         leafMaskImage = leafPixmap.toImage().convertToFormat(QImage::Format_ARGB32);
 
     // 초기 벽 위치 설정
-    treeRects[0] = QRect(60, 260, 180, 320);
-    treeRects[1] = QRect(780, 240, 160, 300);
+    treeRects[0] = QRect(60, 360, 180, 220);
+    treeRects[1] = QRect(780, 340, 160, 200);
     bushRects[0] = QRect(744, 230, 200, 140);
     bushRects[1] = QRect(120, 200, 180, 130);
     leafRects[0] = QRect(272, -20, 240, 140);
@@ -507,8 +507,8 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
     centerPos = QPoint(width() / 2, height() / 2);
 
-    treeRects[0] = QRect(90, height() / 2 - 60, 180, 320);
-    treeRects[1] = QRect(width() - 220, height() - 310, 160, 300);
+    treeRects[0] = QRect(90, height() / 2 + 40, 180, 220);
+    treeRects[1] = QRect(width() - 220, height() - 210, 160, 200);
     bushRects[0] = QRect(225, height() / 2 + 35, 250, 175);
     bushRects[1] = QRect(width() - 500, height() / 2 - 40, 200, 140);
     leafRects[0] = QRect(width() / 2 - 240, 85, 120, 140);
@@ -1014,13 +1014,20 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 painter.drawText(rect().adjusted(0, 55, 0, 0), Qt::AlignCenter,
                                  QString("Player 2: %1").arg(m_clientScore));
             }
-        } else {
-            painter.setFont(QFont("Arial", 26, QFont::Bold));
-            painter.setPen(QColor(255, 220, 50));
-            painter.drawText(rect().adjusted(0, -20, 0, 0), Qt::AlignCenter,
-                             QString("Final Score: %1").arg(score));
         }
-
+        m_sensor.update();  // 카운트다운 동안 센서 유지 → Playing 직전 rezero 정확도 확보
+        aimPos.setX(m_sensor.aimX());
+        aimPos.setY(m_sensor.aimY());
+        clampAim();
+        int elapsed = (int)countdownElapsed.elapsed();
+        if (elapsed >= 1000) {
+            if (countdownPage < 2) {
+                countdownPage++;
+                countdownElapsed.restart();
+            } else {
+                m_sensor.rezero();  // 현재 조준점을 새 중앙으로 재설정 (드리프트 보정)
+            }
+        }
         // GameOver 선택 커서 하이라이트
         QPushButton *goButtons[2] = { btnRetry, btnMainMenu };
         QString selStyle =
@@ -1058,6 +1065,10 @@ void MainWindow::gameLoop()
 {
     if (gameState == Story) {
         if (storyPage < 4) {
+            m_sensor.update();  // Story 1~4: 센서 추적 유지 (내려놓았다 들면 상쇄)
+            aimPos.setX(m_sensor.aimX());
+            aimPos.setY(m_sensor.aimY());
+            clampAim();
             int elapsed = (int)storyElapsed.elapsed();
             if (elapsed >= 3000) {
                 storyPage++;
