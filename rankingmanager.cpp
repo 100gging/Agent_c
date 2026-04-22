@@ -98,11 +98,23 @@ bool RankingManager::addScore(Mode mode, int score,
     e.timestamp  = QDateTime::currentSecsSinceEpoch();
     entries.append(e);
 
-    // 내림차순 정렬, 상위 3개만 유지
+    // 내림차순 정렬, 상위 3개만 유지 — 밀려난 항목의 사진 삭제
     std::sort(entries.begin(), entries.end(),
               [](const Entry &a, const Entry &b) { return a.score > b.score; });
-    if (entries.size() > 3)
-        entries.resize(3);
+    while (entries.size() > 3) {
+        Entry evicted = entries.takeLast();
+        // 밀려난 엔트리의 사진 파일 삭제 (다른 엔트리에서 사용 중이 아닌 경우만)
+        auto removeIfUnused = [&](const QString &path) {
+            if (path.isEmpty()) return;
+            for (const Entry &kept : entries) {
+                if (kept.photoPath == path || kept.photoPath2 == path)
+                    return;
+            }
+            QFile::remove(path);
+        };
+        removeIfUnused(evicted.photoPath);
+        removeIfUnused(evicted.photoPath2);
+    }
 
     save(mode);
     return true;
