@@ -527,8 +527,8 @@ void MainWindow::updateButtonLayout()
     int w = width();
     int h = height();
 
-    btnRetry->setGeometry(w / 2 - 220, h / 2 + 80, 200, 70);
-    btnMainMenu->setGeometry(w / 2 + 20, h / 2 + 80, 200, 70);
+    btnRetry->setGeometry(w / 2 - 220, h - 70 - 10, 200, 70);
+    btnMainMenu->setGeometry(w / 2 + 20, h - 70 - 10, 200, 70);
     btnStart->setGeometry(w / 2 - 145, h / 2 + 35, 290, 78);
 
     bool isGameOver = (gameState == GameOver);
@@ -717,32 +717,23 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.setPen(Qt::white);
         painter.drawText(QRect(0, 20, width(), 50), Qt::AlignCenter, "RANKING");
 
-        // 탭 헤더: Single | Cooperative (Competitive 제거)
-        QString tabs[] = { "SINGLE", "COOPERATIVE" };
-        int tabCount = 2;
-        int tabW = 320, tabH = 40;
-        int tabStartX = (width() - tabW * tabCount - 10) / 2;
+        // 싱글플레이: Single 랭킹, 멀티플레이: Cooperative 랭킹
+        RankingManager::Mode mode = m_network ? RankingManager::Cooperative
+                                              : RankingManager::Single;
+        QString modeLabel = m_network ? "COOPERATIVE" : "SINGLE";
+
+        // 모드 라벨 표시
         painter.setFont(QFont("Arial", 16, QFont::Bold));
-        for (int i = 0; i < tabCount; i++) {
-            QRect tabRect(tabStartX + i * (tabW + 10), 80, tabW, tabH);
-            if (i == m_rankingTab) {
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(60, 160, 60, 200));
-                painter.drawRoundedRect(tabRect, 8, 8);
-                painter.setPen(QColor(100, 255, 100));
-            } else {
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(80, 80, 80, 150));
-                painter.drawRoundedRect(tabRect, 8, 8);
-                painter.setPen(QColor(180, 180, 180));
-            }
-            painter.drawText(tabRect, Qt::AlignCenter, tabs[i]);
+        {
+            QRect labelRect((width() - 320) / 2, 80, 320, 40);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(QColor(60, 160, 60, 200));
+            painter.drawRoundedRect(labelRect, 8, 8);
+            painter.setPen(QColor(100, 255, 100));
+            painter.drawText(labelRect, Qt::AlignCenter, modeLabel);
         }
 
         // 랭킹 항목 표시
-        // m_rankingTab: 0=Single, 1=Cooperative
-        RankingManager::Mode mode = (m_rankingTab == 0) ? RankingManager::Single
-                                                         : RankingManager::Cooperative;
         QVector<RankingManager::Entry> entries;
         if (mode == RankingManager::Cooperative
             && m_network && m_network->role() == NetworkManager::Client) {
@@ -775,9 +766,12 @@ void MainWindow::paintEvent(QPaintEvent *event)
             QRect photoRect(entryRect.x() + 110, entryRect.y() + 10, 80, 80);
             if (i < entries.size()) {
                 if (mode == RankingManager::Cooperative) {
-                    // 협동 모드: 사진 2개 (좌우)
-                    QRect photo1(entryRect.x() + 110, entryRect.y() + 10, 40, 80);
-                    QRect photo2(entryRect.x() + 152, entryRect.y() + 10, 40, 80);
+                    // 협동 모드: 사진 2개 (4:3 비율 가로 이어붙이기)
+                    int cph = 60;
+                    int cpw = (int)(cph * 4.0 / 3.0);  // 각 사진 폭 ~80
+                    int photoY = entryRect.y() + (entryRect.height() - cph) / 2;
+                    QRect photo1(entryRect.x() + 110, photoY, cpw, cph);
+                    QRect photo2(entryRect.x() + 110 + cpw, photoY, cpw, cph);
                     QPixmap pm1, pm2;
                     if (!entries[i].photoPath.isEmpty() && pm1.load(entries[i].photoPath)) {
                         painter.drawPixmap(photo1, pm1.scaled(photo1.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
@@ -799,6 +793,10 @@ void MainWindow::paintEvent(QPaintEvent *event)
                         painter.setPen(QColor(120, 120, 120));
                         painter.drawText(photo2, Qt::AlignCenter, "P2");
                     }
+                    // 합성 사진 테두리
+                    painter.setPen(QPen(medalColors[i], 2));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawRect(QRect(photo1.x(), photo1.y(), cpw * 2, cph));
                 } else {
                     QPixmap pm;
                     if (!entries[i].photoPath.isEmpty() && pm.load(entries[i].photoPath)) {
@@ -823,22 +821,24 @@ void MainWindow::paintEvent(QPaintEvent *event)
 
             if (i < entries.size()) {
                 // 점수
+                int scoreX = (mode == RankingManager::Cooperative) ? entryRect.x() + 280 : entryRect.x() + 210;
                 painter.setFont(QFont("Arial", 32, QFont::Bold));
                 painter.setPen(Qt::white);
-                painter.drawText(QRect(entryRect.x() + 210, entryRect.y(), 300, entryRect.height()),
+                painter.drawText(QRect(scoreX, entryRect.y(), 300, entryRect.height()),
                                  Qt::AlignVCenter | Qt::AlignLeft,
                                  QString::number(entries[i].score));
             } else {
+                int scoreX = (mode == RankingManager::Cooperative) ? entryRect.x() + 280 : entryRect.x() + 210;
                 painter.setFont(QFont("Arial", 20));
                 painter.setPen(QColor(100, 100, 100));
-                painter.drawText(QRect(entryRect.x() + 210, entryRect.y(), 300, entryRect.height()),
+                painter.drawText(QRect(scoreX, entryRect.y(), 300, entryRect.height()),
                                  Qt::AlignVCenter | Qt::AlignLeft, "---");
             }
         }
 
         painter.setFont(QFont("Arial", 14));
         drawOutlinedText(QRect(0, height() - 50, width(), 40), Qt::AlignCenter,
-                         "SW2/SW3: CHANGE TAB  |  FIRE: BACK");
+                         "FIRE: BACK");
         return;
     }
 
@@ -1398,54 +1398,69 @@ void MainWindow::paintEvent(QPaintEvent *event)
             }
 
             int rankStartY = 215;
-            painter.setFont(QFont("Arial", 16, QFont::Bold));
+            painter.setFont(QFont("Arial", 20, QFont::Bold));
             painter.setPen(QColor(200, 200, 200));
-            painter.drawText(QRect(0, rankStartY - 25, width(), 20), Qt::AlignCenter, "- TOP 3 -");
+            painter.drawText(QRect(0, rankStartY - 30, width(), 26), Qt::AlignCenter, "- TOP 3 -");
 
             QString medals[] = { "1st", "2nd", "3rd" };
             QColor medalColors[] = { QColor(255, 215, 0), QColor(192, 192, 192), QColor(205, 127, 50) };
-            int entryH = 45;
+            int photoH = 64;
+            int entryH = photoH + 12;
+            bool isCoop = (m_network && m_gameMode == Cooperative);
+            if (isCoop) entryH = 90 + 14;  // co-op은 사진 90px + 여백
 
             for (int i = 0; i < 3; i++) {
                 int y = rankStartY + i * entryH;
-                painter.setFont(QFont("Arial", 16, QFont::Bold));
+                painter.setFont(QFont("Arial", 20, QFont::Bold));
                 painter.setPen(medalColors[i]);
-                painter.drawText(QRect(width() / 2 - 160, y, 60, entryH), Qt::AlignVCenter | Qt::AlignRight, medals[i]);
+                int medalX = isCoop ? (width() / 2 - 210) : (width() / 2 - 190);
+                painter.drawText(QRect(medalX, y, 70, entryH), Qt::AlignVCenter | Qt::AlignRight, medals[i]);
 
                 // 사진 썸네일
                 if (i < top3.size() && m_network && m_gameMode == Cooperative) {
-                    // 협동 모드: 사진 2개 (좌우)
-                    QRect photo1(width() / 2 - 90, y + 4, 18, 36);
-                    QRect photo2(width() / 2 - 72, y + 4, 18, 36);
+                    // 협동 모드: 사진 2개 (1x2 합성) — 더 크게
+                    int cPhotoH = 90;
+                    int cpw = (int)(cPhotoH * 4.0 / 3.0);  // 각 사진 폭 ~120
+                    QRect photo1(width() / 2 - 130, y + (entryH - cPhotoH) / 2 - 5, cpw, cPhotoH);
+                    QRect photo2(width() / 2 - 130 + cpw, y + (entryH - cPhotoH) / 2 - 5, cpw, cPhotoH);
                     QPixmap pm1, pm2;
                     if (!top3[i].photoPath.isEmpty() && pm1.load(top3[i].photoPath)) {
                         painter.drawPixmap(photo1, pm1.scaled(photo1.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
-                        painter.setPen(QPen(medalColors[i], 1));
-                        painter.setBrush(Qt::NoBrush);
-                        painter.drawRect(photo1);
                     } else {
                         painter.setPen(QPen(QColor(100, 100, 100), 1));
                         painter.setBrush(QColor(60, 60, 60, 150));
                         painter.drawRect(photo1);
-                        painter.setFont(QFont("Arial", 6));
+                        painter.setFont(QFont("Arial", 10));
                         painter.setPen(QColor(120, 120, 120));
                         painter.drawText(photo1, Qt::AlignCenter, "P1");
                     }
                     if (!top3[i].photoPath2.isEmpty() && pm2.load(top3[i].photoPath2)) {
                         painter.drawPixmap(photo2, pm2.scaled(photo2.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
-                        painter.setPen(QPen(medalColors[i], 1));
-                        painter.setBrush(Qt::NoBrush);
-                        painter.drawRect(photo2);
                     } else {
                         painter.setPen(QPen(QColor(100, 100, 100), 1));
                         painter.setBrush(QColor(60, 60, 60, 150));
                         painter.drawRect(photo2);
-                        painter.setFont(QFont("Arial", 6));
+                        painter.setFont(QFont("Arial", 10));
                         painter.setPen(QColor(120, 120, 120));
                         painter.drawText(photo2, Qt::AlignCenter, "P2");
                     }
+                    // 합성 사진 전체 테두리
+                    painter.setPen(QPen(medalColors[i], 2));
+                    painter.setBrush(Qt::NoBrush);
+                    painter.drawRect(QRect(photo1.x(), photo1.y(), cpw * 2, cPhotoH));
+
+                    // 점수 (합성 사진 오른쪽)
+                    if (i < top3.size()) {
+                        painter.setFont(QFont("Arial", 22, QFont::Bold));
+                        painter.setPen(Qt::white);
+                        painter.drawText(QRect(photo2.right() + 12, y, 130, entryH),
+                                         Qt::AlignVCenter | Qt::AlignLeft,
+                                         QString::number(top3[i].score));
+                    }
                 } else {
-                    QRect thumbRect(width() / 2 - 90, y + 4, 36, 36);
+                    // 싱글 모드: 큰 사진 1개
+                    int pw = (int)(photoH * 4.0 / 3.0);
+                    QRect thumbRect(width() / 2 - 110, y + (entryH - photoH) / 2 - 5, pw, photoH);
                     if (i < top3.size() && !top3[i].photoPath.isEmpty()) {
                         QPixmap pm;
                         if (pm.load(top3[i].photoPath)) {
@@ -1463,18 +1478,19 @@ void MainWindow::paintEvent(QPaintEvent *event)
                         painter.setBrush(QColor(50, 50, 50, 120));
                         painter.drawRect(thumbRect);
                     }
-                }
 
-                if (i < top3.size()) {
-                    painter.setFont(QFont("Arial", 16, QFont::Bold));
-                    painter.setPen(Qt::white);
-                    painter.drawText(QRect(width() / 2 - 40, y, 160, entryH),
-                                     Qt::AlignVCenter | Qt::AlignLeft,
-                                     QString::number(top3[i].score));
-                } else {
-                    painter.setPen(QColor(100, 100, 100));
-                    painter.drawText(QRect(width() / 2 - 40, y, 160, entryH),
-                                     Qt::AlignVCenter | Qt::AlignLeft, "---");
+                    // 점수 (사진 오른쪽)
+                    if (i < top3.size()) {
+                        painter.setFont(QFont("Arial", 20, QFont::Bold));
+                        painter.setPen(Qt::white);
+                        painter.drawText(QRect(thumbRect.right() + 10, y, 120, entryH),
+                                         Qt::AlignVCenter | Qt::AlignLeft,
+                                         QString::number(top3[i].score));
+                    } else {
+                        painter.setPen(QColor(100, 100, 100));
+                        painter.drawText(QRect(thumbRect.right() + 10, y, 120, entryH),
+                                         Qt::AlignVCenter | Qt::AlignLeft, "---");
+                    }
                 }
             }
         }
@@ -1917,7 +1933,7 @@ void MainWindow::onSw2Pressed()
         m_menuCursor = (m_menuCursor + 1) % 3;
         update();
     } else if (gameState == Ranking) {
-        m_rankingTab = (m_rankingTab + 1) % 2;
+        // 탭 없으므로 무시
         update();
     }
 }
@@ -1937,7 +1953,7 @@ void MainWindow::onSw3Pressed()
         m_menuCursor = (m_menuCursor - 1 + 3) % 3;
         update();
     } else if (gameState == Ranking) {
-        m_rankingTab = (m_rankingTab - 1 + 2) % 2;
+        // 탭 없으므로 무시
         update();
     } else if (gameState == TakingPhoto) {
         // 뒤로가기
