@@ -44,6 +44,7 @@ MPU6050Sensor::MPU6050Sensor()
     , m_basePitch(0), m_baseRoll(0)
     , m_filteredPitch(0), m_filteredRoll(0)
     , m_sensitivityX(15.0), m_sensitivityY(15.0)
+    , m_centerDecayRate(0.0015)
     , m_deadzoneDeg(2.0)
     , m_aimX(512), m_aimY(300)
     , m_firstUpdate(true)
@@ -263,6 +264,14 @@ void MPU6050Sensor::update()
     */
     m_filteredPitch = 0.98 * (m_filteredPitch + gPitch * dt) + 0.02 * m_accelPitch;
     m_filteredRoll  = m_filteredRoll + gYaw * dt;  /* 자이로만 적분 */
+
+    /* 3-1) 중앙 복귀 감쇠 (Yaw 드리프트 보정)
+       자이로 적분만 사용하는 Roll(Yaw)은 시간이 지나면 오프셋이 누적되므로
+       매 프레임 m_baseRoll 방향으로 미세하게 당겨줌.
+       dt * 100 을 곱해 프레임레이트 독립적으로 동작하게 함. */
+    double decayFactor = m_centerDecayRate * dt * 100.0;
+    m_filteredRoll  += (m_baseRoll  - m_filteredRoll)  * decayFactor;
+    m_filteredPitch += (m_basePitch - m_filteredPitch) * decayFactor;
 
     /* 4) 기준값과의 차이 계산 — 디버그용으로 멤버에 저장 */
     m_deltaPitch = m_filteredPitch - m_basePitch;

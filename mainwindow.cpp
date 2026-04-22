@@ -1011,15 +1011,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 painter.setBrush(QColor(200, 40, 40, 120));
                 painter.drawEllipse(calTarget, 30, 30);
             }
-            if (m_sensorReady) {
-                QColor calAimColor = (m_network && m_network->role() == NetworkManager::Client)
-                    ? QColor(100, 200, 255) : Qt::green;
-                painter.setPen(QPen(calAimColor, 3));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawEllipse(aimPos, aimRadius, aimRadius);
-                painter.drawLine(aimPos.x() - 30, aimPos.y(), aimPos.x() + 30, aimPos.y());
-                painter.drawLine(aimPos.x(), aimPos.y() - 30, aimPos.x(), aimPos.y() + 30);
-            }
+            /* calPhase==0: 에임 표시하지 않음 — BCM4 누르면 rezero 후 표시 */
         } else {
             painter.setFont(QFont("Nanum Gothic", 22, QFont::Normal));
             drawOutlinedText(rect().adjusted(0, 60, 0, 0), Qt::AlignCenter,
@@ -1622,11 +1614,13 @@ void MainWindow::gameLoop()
     }
 
     if (gameState != Playing) {
-        if (gameState == Calibrating && (calPhase == 0 || calPhase == 1)) {
-            m_sensor.update();
-            aimPos.setX(m_sensor.aimX());
-            aimPos.setY(m_sensor.aimY());
-            clampAim();
+        if (gameState == Calibrating) {
+            m_sensor.update();  /* 센서는 항상 업데이트 (내부 필터 유지) */
+            if (calPhase == 1) {
+                aimPos.setX(m_sensor.aimX());
+                aimPos.setY(m_sensor.aimY());
+                clampAim();
+            }
         }
         fireEffect = false;
         update();
@@ -1964,7 +1958,7 @@ void MainWindow::onSw3Pressed()
         gameState = Menu;
         updateButtonLayout();
         update();
-    } else if (gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading && gameState != ModeSelect && gameState != TakingPhoto) {
+    } else if (gameState != TakingPhoto) {
         prevState = gameState;
         if (gameState == Playing) {
             pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
@@ -2188,8 +2182,10 @@ void MainWindow::fire()
         m_audio->playSfx("fire");
 
         if (calPhase == 0) {
-            centerPos = aimPos;
-            aimPos = QPoint(width() / 2, height() / 2);
+            /* 현재 센서 자세를 화면 중앙으로 영점 설정 */
+            m_sensor.rezero();
+            centerPos = QPoint(width() / 2, height() / 2);
+            aimPos = centerPos;
             calPhase = 1;
         } else {
             int boxW = 70, boxH = 50;

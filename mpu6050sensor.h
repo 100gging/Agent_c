@@ -51,6 +51,9 @@ public:
     /* 민감도 설정 (각도 1도 = 픽셀 몇 칸) */
     void setSensitivity(double sx, double sy) { m_sensitivityX = sx; m_sensitivityY = sy; }
 
+    /* 중앙 복귀 감쇠 계수 설정 (0.001=느림 ~ 0.01=빠름, 기본 0.0015) */
+    void setCenterDecay(double rate) { m_centerDecayRate = rate; }
+
     /* ── 디버그용 getter ── */
     /* 최근 raw 값 */
     int16_t rawAccelX() const { return m_lastRaw.accel_x; }
@@ -116,6 +119,9 @@ private:
     /* 민감도 — 각도 1도 차이를 픽셀 몇 칸으로 변환할지 */
     double m_sensitivityX;
     double m_sensitivityY;
+
+    /* 중앙 복귀 감쇠 계수 — 매 프레임 filteredRoll을 baseRoll 방향으로 미세 감쇠 */
+    double m_centerDecayRate;
 
     /* 데드존 — 이 각도 이내의 움직임은 손떨림으로 보고 무시 */
     double m_deadzoneDeg;
