@@ -14,7 +14,8 @@ NetworkManager::NetworkManager(Role role, QObject *parent)
       m_socket(nullptr),
       m_retryTimer(nullptr),
       m_retryCount(0),
-      m_clientReady(false)
+      m_clientReady(false),
+      m_modeLocked(false)
 {
     if (m_role == Server) {
         // 서버 모드: QTcpServer 생성
@@ -255,6 +256,29 @@ void NetworkManager::processMessages(QTcpSocket *socket, bool isFromClient)
         } else if (msg.startsWith("STATE ") && !isFromClient) {
             // 클라이언트: 서버 게임 상태 수신
             emit stateReceived(msg.mid(6));
+
+        } else if ((msg == "MODE_COOP" || msg == "MODE_COMP") && isFromClient) {
+            // 서버: 클라이언트가 모드 선택 → 선착순 확정 후 에코
+            if (!m_modeLocked) {
+                m_modeLocked = true;
+                bool coop = (msg == "MODE_COOP");
+                const char *reply = coop ? "MODE_COOP\n" : "MODE_COMP\n";
+                if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+                    m_clientSocket->write(reply);
+                    m_clientSocket->flush();
+                }
+                emit modeReceived(coop);
+            }
+
+        } else if ((msg == "MODE_COOP" || msg == "MODE_COMP") && !isFromClient) {
+            // 클라이언트: 서버로부터 확정된 모드 수신
+            emit modeReceived(msg == "MODE_COOP");
+
+        } else if (msg.startsWith("SAIM ") && !isFromClient) {
+            // 클라이언트: ModeSelect 중 서버 에임 수신
+            QStringList parts = msg.split(' ');
+            if (parts.size() >= 3)
+                emit aimReceived(parts[1].toInt(), parts[2].toInt());
         }
     }
 }
@@ -382,4 +406,47 @@ void NetworkManager::sendState(const QString &stateData)
     if (m_role != Server) return;
     if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState)
         m_clientSocket->write(("STATE " + stateData + "\n").toUtf8());
+}
+
+// =====================================================================
+// sendMode(): 모드 선택 전송
+// =====================================================================
+void NetworkManager::sendMode(bool cooperative)
+{
+    const QByteArray msg = cooperative ? "MODE_COOP\n" : "MODE_COMP\n";
+    if (m_role == Server) {
+        // 서버가 먼저 선택한 경우: 직접 잠금 후 클라이언트에 전파
+        if (m_modeLocked) return;
+        m_modeLocked = true;
+        if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState) {
+            m_clientSocket->write(msg);
+            m_clientSocket->flush();
+        }
+        emit modeReceived(cooperative);
+    } else {
+        // 클라이언트: 서버에 요청 전송 후 서버 확인 대기
+        if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+            m_socket->write(msg);
+            m_socket->flush();
+        }
+    }
+}
+
+// =====================================================================
+// sendServerAim(): 서버 → 클라이언트: ModeSelect 화면에서 서버 에임 전송
+// =====================================================================
+void NetworkManager::sendServerAim(int x, int y)
+{
+    if (m_role != Server) return;
+    if (m_clientSocket && m_clientSocket->state() == QAbstractSocket::ConnectedState)
+        m_clientSocket->write(QString("SAIM %1 %2\n").arg(x).arg(y).toUtf8());
+}
+
+// =====================================================================
+// resetModeLock(): 모드 잠금 초기화 (retry 시 호출)
+// =====================================================================
+void NetworkManager::resetModeLock()
+{
+    m_modeLocked = false;
+    qDebug() << "[NetworkManager] 모드 잠금 초기화됨";
 }

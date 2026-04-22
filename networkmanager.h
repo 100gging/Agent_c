@@ -70,6 +70,14 @@ public:
     /** 서버 → 클라이언트: 게임 전체 상태 전송 */
     void sendState(const QString &stateData);
 
+    // ── 모드 선택 메시지 전송 ──
+    /** 모드 선택 확정 전송 (서버: 클라이언트에게 전파, 클라이언트: 서버에게 요청) */
+    void sendMode(bool cooperative);
+    /** 서버 → 클라이언트: ModeSelect 화면에서 서버 에임 좌표 전송 */
+    void sendServerAim(int x, int y);
+    /** 모드 잠금 초기화 (retry 시 호출) */
+    void resetModeLock();
+
 signals:
     /**
      * @brief 상대방이 READY를 전송했을 때 emit.
@@ -96,6 +104,8 @@ signals:
     void fireReceived();
     /** 클라이언트가 서버 STATE 수신 시 emit */
     void stateReceived(const QString &stateData);
+    /** 모드 선택 메시지 수신 시 emit */
+    void modeReceived(bool cooperative);
 
 private slots:
     // [서버 전용] 새 클라이언트 접속 처리
@@ -143,6 +153,7 @@ private:
     int         m_retryCount;       // 재연결 시도 횟수
     static constexpr int MAX_RETRIES = 15;  // 최대 재시도 (15회 × 2초 = 30초)
     bool        m_clientReady;      // 클라이언트 로컬 READY 전송 여부
+    bool        m_modeLocked;       // 모드 선착순 잠금 (서버 전용)
 };
 
 #endif // NETWORKMANAGER_H

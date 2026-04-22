@@ -62,7 +62,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    enum GameState { Menu, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings };
+    enum GameState { Menu, Calibrating, Story, HowToPlay, Loading, Countdown, Playing, GameOver, Settings, ModeSelect };
+    enum GameMode  { Solo, Cooperative, Competition };
 
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
@@ -86,6 +87,8 @@ private slots:
     void retryGame();
     void goToMainMenu();
     void onCalibrationDone();
+    void showModeSelect();
+    void onModeReceived(bool cooperative);
 
     // TCP 동기화: 양쪽 모두 GO 수신 시 게임 시작
     void onSyncGo();
@@ -243,6 +246,10 @@ private:
     int    m_pendingHitCode;
     QVector<Target> m_remoteTargets;
     int    m_remoteRemainMs;
+
+    // 게임 모드 (멀티플레이어)
+    GameMode m_gameMode;
+    bool     m_modeLocked;  // 서버 측: 모드 선착순 확정 플래그
 };
 
 #endif // MAINWINDOW_H

@@ -73,7 +73,9 @@ MainWindow::MainWindow(QWidget *parent)
       blackgatmonPhase(0),
       blackgatmonNextSpawnMs(7000),
       enemyAttackActive(false),
-      m_serverEnemyAttackOnly(false)
+      m_serverEnemyAttackOnly(false),
+      m_gameMode(Solo),
+      m_modeLocked(false)
 {
     resize(1024, 600);
     setWindowTitle("Agent C");
@@ -755,15 +757,86 @@ void MainWindow::paintEvent(QPaintEvent *event)
         return;
     }
 
+    if (gameState == ModeSelect) {
+        if (!backgroundPixmap.isNull())
+            painter.drawPixmap(rect(), backgroundPixmap);
+        painter.fillRect(rect(), QColor(0, 0, 0, 130));
+
+        painter.setFont(QFont("Arial", 30, QFont::Bold));
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(0, 30, width(), 60), Qt::AlignCenter, "SELECT GAME MODE");
+
+        int bw = 300, bh = 90;
+        QRect coopBtn(width() / 4 - bw / 2, height() / 2 - bh / 2, bw, bh);
+        QRect compBtn(3 * width() / 4 - bw / 2, height() / 2 - bh / 2, bw, bh);
+
+        // Cooperative 버튼
+        painter.setPen(QPen(QColor(80, 200, 80), 3));
+        painter.setBrush(QColor(30, 130, 30, 200));
+        painter.drawRoundedRect(coopBtn, 14, 14);
+        painter.setPen(Qt::white);
+        painter.setFont(QFont("Arial", 20, QFont::Bold));
+        painter.drawText(coopBtn, Qt::AlignCenter, "Cooperative\nMode");
+
+        // Competition 버튼
+        painter.setPen(QPen(QColor(200, 80, 80), 3));
+        painter.setBrush(QColor(130, 30, 30, 200));
+        painter.drawRoundedRect(compBtn, 14, 14);
+        painter.setPen(Qt::white);
+        painter.drawText(compBtn, Qt::AlignCenter, "Competition\nMode");
+
+        // 설명 텍스트
+        painter.setFont(QFont("Arial", 13));
+        painter.setPen(QColor(180, 255, 180));
+        drawOutlinedText(QRect(width() / 4 - 150, height() / 2 + 55, 300, 40),
+                         Qt::AlignCenter, "Team up! Share scores.");
+        painter.setPen(QColor(255, 180, 180));
+        drawOutlinedText(QRect(3 * width() / 4 - 150, height() / 2 + 55, 300, 40),
+                         Qt::AlignCenter, "Compete for high score!");
+
+        if (m_waitingForPeer) {
+            painter.setFont(QFont("Arial", 20, QFont::Bold));
+            painter.setPen(QColor(255, 220, 50));
+            painter.drawText(QRect(0, height() - 80, width(), 40), Qt::AlignCenter,
+                             "Waiting for opponent...");
+        }
+
+        // 로컬 에임
+        QColor modeLocalAimColor = (m_network && m_network->role() == NetworkManager::Client)
+            ? QColor(100, 200, 255) : Qt::green;
+        painter.setPen(QPen(modeLocalAimColor, 3));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawEllipse(aimPos, aimRadius, aimRadius);
+        painter.drawLine(aimPos.x() - 25, aimPos.y(), aimPos.x() + 25, aimPos.y());
+        painter.drawLine(aimPos.x(), aimPos.y() - 25, aimPos.x(), aimPos.y() + 25);
+
+        // 상대방 에임
+        if (m_network) {
+            QColor modePeerColor = (m_network->role() == NetworkManager::Client)
+                ? Qt::green : QColor(100, 200, 255);
+            painter.setPen(QPen(modePeerColor, 3));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(m_peerAimPos, aimRadius, aimRadius);
+            painter.drawLine(m_peerAimPos.x() - 25, m_peerAimPos.y(), m_peerAimPos.x() + 25, m_peerAimPos.y());
+            painter.drawLine(m_peerAimPos.x(), m_peerAimPos.y() - 25, m_peerAimPos.x(), m_peerAimPos.y() + 25);
+        }
+        return;
+    }
+
     // --- Playing / GameOver ---
 
     // 상단 정보
     painter.setFont(infoFont);
     if (m_network) {
-        painter.setPen(Qt::green);
-        painter.drawText(20, 35, QString("Player 1: %1").arg(m_serverScore));
-        painter.setPen(QColor(100, 200, 255));
-        painter.drawText(20, 65, QString("Player 2: %1").arg(m_clientScore));
+        if (m_gameMode == Cooperative) {
+            painter.setPen(QColor(100, 255, 100));
+            painter.drawText(20, 35, QString("TEAM: %1").arg(m_serverScore + m_clientScore));
+        } else {
+            painter.setPen(Qt::green);
+            painter.drawText(20, 35, QString("Player 1: %1").arg(m_serverScore));
+            painter.setPen(QColor(100, 200, 255));
+            painter.drawText(20, 65, QString("Player 2: %1").arg(m_clientScore));
+        }
     } else {
         painter.setPen(Qt::white);
         painter.drawText(20, 35, QString("Score: %1").arg(score));
@@ -915,21 +988,32 @@ void MainWindow::paintEvent(QPaintEvent *event)
         painter.drawText(rect().adjusted(0, -100, 0, 0), Qt::AlignCenter, "GAME OVER");
 
         if (m_network) {
-            QString winText;
-            QColor  winColor;
-            if      (m_serverScore > m_clientScore) { winText = "Player 1 WINS!";  winColor = Qt::green; }
-            else if (m_clientScore > m_serverScore) { winText = "Player 2 WINS!"; winColor = QColor(100, 200, 255); }
-            else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
-            painter.setFont(QFont("Arial", 30, QFont::Bold));
-            painter.setPen(winColor);
-            painter.drawText(rect().adjusted(0, -30, 0, 0), Qt::AlignCenter, winText);
-            painter.setFont(QFont("Arial", 22, QFont::Bold));
-            painter.setPen(Qt::green);
-            painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
-                             QString("Player 1: %1").arg(m_serverScore));
-            painter.setPen(QColor(100, 200, 255));
-            painter.drawText(rect().adjusted(0, 55, 0, 0), Qt::AlignCenter,
-                             QString("Player 2: %1").arg(m_clientScore));
+            if (m_gameMode == Cooperative) {
+                int teamScore = m_serverScore + m_clientScore;
+                painter.setFont(QFont("Arial", 30, QFont::Bold));
+                painter.setPen(QColor(100, 255, 100));
+                painter.drawText(rect().adjusted(0, -30, 0, 0), Qt::AlignCenter, "MISSION COMPLETE!");
+                painter.setFont(QFont("Arial", 26, QFont::Bold));
+                painter.setPen(QColor(255, 220, 50));
+                painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
+                                 QString("TEAM SCORE: %1").arg(teamScore));
+            } else {
+                QString winText;
+                QColor  winColor;
+                if      (m_serverScore > m_clientScore) { winText = "Player 1 WINS!";  winColor = Qt::green; }
+                else if (m_clientScore > m_serverScore) { winText = "Player 2 WINS!"; winColor = QColor(100, 200, 255); }
+                else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
+                painter.setFont(QFont("Arial", 30, QFont::Bold));
+                painter.setPen(winColor);
+                painter.drawText(rect().adjusted(0, -30, 0, 0), Qt::AlignCenter, winText);
+                painter.setFont(QFont("Arial", 22, QFont::Bold));
+                painter.setPen(Qt::green);
+                painter.drawText(rect().adjusted(0, 20, 0, 0), Qt::AlignCenter,
+                                 QString("Player 1: %1").arg(m_serverScore));
+                painter.setPen(QColor(100, 200, 255));
+                painter.drawText(rect().adjusted(0, 55, 0, 0), Qt::AlignCenter,
+                                 QString("Player 2: %1").arg(m_clientScore));
+            }
         } else {
             painter.setFont(QFont("Arial", 26, QFont::Bold));
             painter.setPen(QColor(255, 220, 50));
@@ -1026,6 +1110,23 @@ void MainWindow::gameLoop()
                 m_audio->playBgm("game");
                 updateButtonLayout();
             }
+        }
+        update();
+        return;
+    }
+
+    if (gameState == ModeSelect) {
+        m_sensor.update();
+        aimPos.setX(m_sensor.aimX());
+        aimPos.setY(m_sensor.aimY());
+        clampAim();
+        if (m_network && m_network->isConnected()) {
+            // 클라이언트: 에임을 서버에 전송
+            if (m_network->role() == NetworkManager::Client)
+                m_network->sendAim(aimPos.x(), aimPos.y());
+            // 서버: 에임을 클라이언트에 전송 (SAIM)
+            else
+                m_network->sendServerAim(aimPos.x(), aimPos.y());
         }
         update();
         return;
@@ -1247,17 +1348,37 @@ void MainWindow::onGpioPressed()
             QRect startBtn(width() / 2 - bw / 2, height() - 90, bw, bh);
             if (startBtn.contains(aimPos)) {
                 if (m_network) {
-                    if (!m_waitingForPeer) {
-                        m_waitingForPeer = true;
-                        update();
-                        m_network->sendReady();
-                    }
+                    showModeSelect();
                 } else {
                     showHowToPlay();
                 }
             }
         }
         break;
+    case ModeSelect: {
+        if (m_waitingForPeer) break; // 이미 선택 후 서버 확인 대기 중
+        int bw = 300, bh = 90;
+        QRect coopBtn(width() / 4 - bw / 2, height() / 2 - bh / 2, bw, bh);
+        QRect compBtn(3 * width() / 4 - bw / 2, height() / 2 - bh / 2, bw, bh);
+        bool hitCoop = coopBtn.contains(aimPos);
+        bool hitComp = compBtn.contains(aimPos);
+        if (!hitCoop && !hitComp) break;
+        if (m_network) {
+            if (m_network->role() == NetworkManager::Server) {
+                if (m_modeLocked) break;
+                m_modeLocked = true;
+                m_gameMode = hitCoop ? Cooperative : Competition;
+                m_network->sendMode(hitCoop); // 클라이언트에게 확정된 모드 전송
+                showHowToPlay();
+            } else {
+                // 클라이언트: 선택을 서버에 전송 후 서버 확인 대기
+                m_waitingForPeer = true;
+                m_network->sendMode(hitCoop);
+                update();
+            }
+        }
+        break;
+    }
     case HowToPlay:
     case Countdown:
     case Loading:
@@ -1301,7 +1422,7 @@ void MainWindow::onSw3Pressed()
         if (gameOverTimer.elapsed() < 2000) return;
         gameOverCursor = (gameOverCursor + 1) % 2;
         update();
-    } else if (gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading) {
+    } else if (gameState != HowToPlay && gameState != Countdown && gameState != Story && gameState != Loading && gameState != ModeSelect) {
         prevState = gameState;
         if (gameState == Playing) {
             pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
@@ -1334,6 +1455,8 @@ void MainWindow::setNetworkManager(NetworkManager *nm)
             this,      &MainWindow::onFireReceived);
     connect(m_network, &NetworkManager::stateReceived,
             this,      &MainWindow::onStateReceived);
+    connect(m_network, &NetworkManager::modeReceived,
+            this,      &MainWindow::onModeReceived);
 
     m_network->start();
 
@@ -1348,12 +1471,8 @@ void MainWindow::onSyncGo()
 {
     qDebug() << "[MainWindow] syncGo 수신";
     m_waitingForPeer = false;
-    // GameOver에서 retry한 경우: 바로 카운트다운
-    if (gameState == GameOver) {
-        showCountdown();
-    } else {
-        showHowToPlay();
-    }
+    // 멀티플레이어: 항상 모드 선택 화면으로 이동 (게임 시작 / retry 모두)
+    showModeSelect();
 }
 
 // =====================================================================
@@ -1380,6 +1499,38 @@ void MainWindow::showStory()
     storyElapsed.start();
     updateButtonLayout();
     update();
+}
+
+void MainWindow::showModeSelect()
+{
+    if (!m_network) {
+        showHowToPlay();
+        return;
+    }
+    m_modeLocked = false;
+    m_waitingForPeer = false;
+    m_gameMode = Solo;
+    m_network->resetModeLock();
+    gameState = ModeSelect;
+    updateButtonLayout();
+    update();
+}
+
+void MainWindow::onModeReceived(bool cooperative)
+{
+    if (m_network && m_network->role() == NetworkManager::Server) {
+        // 서버: 클라이언트가 먼저 선택한 경우 (선착순 확정)
+        if (m_modeLocked) return;
+        m_modeLocked = true;
+        m_gameMode = cooperative ? Cooperative : Competition;
+        m_network->sendMode(cooperative); // 확정된 모드를 클라이언트에게 에코
+        showHowToPlay();
+    } else {
+        // 클라이언트: 서버로부터 확정된 모드 수신
+        m_gameMode = cooperative ? Cooperative : Competition;
+        m_waitingForPeer = false;
+        showHowToPlay();
+    }
 }
 
 void MainWindow::showHowToPlay()
@@ -1567,10 +1718,9 @@ void MainWindow::retryGame()
     resetGame();
     if (m_network) {
         m_network->resetReady();
-        // 네트워크 모드 retry: READY 동기화 후 바로 카운트다운
-        m_waitingForPeer = true;
-        m_network->sendReady();
-        update();
+        m_network->resetModeLock();
+        // 네트워크 모드 retry: 모드 선택 화면으로 복귀
+        showModeSelect();
     } else {
         showCountdown();
     }
@@ -1615,14 +1765,18 @@ int MainWindow::processHitForPlayer(QPoint aim, bool isServer)
             // hitCode 5 = host killed → client gets enemy_attack
             // hitCode 6 = client killed → host gets enemy_attack
             if (isServer) {
-                // host killed blackgatmon: host does NOT get enemy_attack, client will
+                // Competition: host 쪽에는 공격 없음, client에 enemy_attack (hitCode 5가 클라이언트에서 처리)
+                // Cooperative: 아무도 공격받지 않음 (hitCode 5는 클라이언트에서 조건부로 처리)
                 return 5;
             } else {
-                // client killed blackgatmon: host gets enemy_attack (client should NOT)
-                enemyAttackActive = true;
-                m_serverEnemyAttackOnly = true;
-                enemyAttackTimer.restart();
-                m_audio->playSfx("enemy_attack");
+                // Competition: host gets enemy_attack (client should NOT)
+                // Cooperative: 아무도 공격받지 않음
+                if (m_gameMode != Cooperative) {
+                    enemyAttackActive = true;
+                    m_serverEnemyAttackOnly = true;
+                    enemyAttackTimer.restart();
+                    m_audio->playSfx("enemy_attack");
+                }
                 return 6;
             }
         }
@@ -1711,9 +1865,9 @@ void MainWindow::parseStateString(const QString &s)
         activeHits.append(hi);
     }
 
-    // hitCode 5 = host killed blackgatmon → client gets enemy_attack overlay
+    // hitCode 5 = host killed blackgatmon → client gets enemy_attack (Competition only)
     // hitCode 6 = client killed blackgatmon → host gets enemy_attack (handled on server side)
-    if (hitCode == 5) {
+    if (hitCode == 5 && m_gameMode != Cooperative) {
         enemyAttackActive = true;
         enemyAttackTimer.restart();
         m_audio->playSfx("enemy_attack");
