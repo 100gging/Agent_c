@@ -1336,7 +1336,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
             } else {
                 QString winText;
                 QColor  winColor;
-<<<<<<< HEAD
                 QString winnerPhotoPath;
                 if      (m_serverScore > m_clientScore) {
                     winText = "Player 1 WINS!";  winColor = Qt::green;
@@ -1349,13 +1348,7 @@ void MainWindow::paintEvent(QPaintEvent *event)
                         ? m_playerPhotoPath : m_peerPhotoPath;
                 }
                 else { winText = "DRAW!"; winColor = Qt::yellow; }
-                painter.setFont(QFont("Arial", 26, QFont::Bold));
-=======
-                if      (m_serverScore > m_clientScore) { winText = "Player 1 WINS!";  winColor = Qt::green; }
-                else if (m_clientScore > m_serverScore) { winText = "Player 2 WINS!"; winColor = QColor(100, 200, 255); }
-                else                                    { winText = "DRAW!";       winColor = Qt::yellow; }
                 painter.setFont(QFont("Arial", 32, QFont::Bold));
->>>>>>> befa44f0ff6e5051015b09b2a6123ecd6f67b5eb
                 painter.setPen(winColor);
                 painter.drawText(QRect(0, 60, width(), 50), Qt::AlignCenter, winText);
                 painter.setFont(QFont("Arial", 24, QFont::Bold));
@@ -1370,10 +1363,10 @@ void MainWindow::paintEvent(QPaintEvent *event)
                 if (!winnerPhotoPath.isEmpty()) {
                     QPixmap winPm;
                     if (winPm.load(winnerPhotoPath)) {
-                        int photoH = height() - scoreAreaY - 130;
+                        int photoH = height() - 190;
                         if (photoH > 300) photoH = 300;
                         int photoW = (int)(photoH * 4.0 / 3.0);
-                        QRect photoRect(width() / 2 - photoW / 2, scoreAreaY + 100, photoW, photoH);
+                        QRect photoRect(width() / 2 - photoW / 2, 210, photoW, photoH);
                         painter.drawPixmap(photoRect, winPm.scaled(photoRect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
                         painter.setPen(QPen(winColor, 3));
                         painter.setBrush(Qt::NoBrush);
@@ -1392,7 +1385,6 @@ void MainWindow::paintEvent(QPaintEvent *event)
         bool showRanking = true;
         if (m_network && m_gameMode != Cooperative) showRanking = false;
 
-<<<<<<< HEAD
         if (showRanking) {
             QVector<RankingManager::Entry> top3;
             if (m_network && m_gameMode == Cooperative) {
@@ -1401,42 +1393,11 @@ void MainWindow::paintEvent(QPaintEvent *event)
                     top3 = m_ranking->getTop3(RankingManager::Cooperative);
                 else
                     top3 = m_coopRankCache;
-=======
-        int rankStartY = 215;
-        painter.setFont(QFont("Arial", 16, QFont::Bold));
-        painter.setPen(QColor(200, 200, 200));
-        painter.drawText(QRect(0, rankStartY - 25, width(), 20), Qt::AlignCenter, "- TOP 3 -");
-
-        QString medals[] = { "1st", "2nd", "3rd" };
-        QColor medalColors[] = { QColor(255, 215, 0), QColor(192, 192, 192), QColor(205, 127, 50) };
-        int entryH = 45;
-
-        for (int i = 0; i < 3; i++) {
-            int y = rankStartY + i * entryH;
-            painter.setFont(QFont("Arial", 16, QFont::Bold));
-            painter.setPen(medalColors[i]);
-            painter.drawText(QRect(width() / 2 - 160, y, 60, entryH), Qt::AlignVCenter | Qt::AlignRight, medals[i]);
-
-            // 사진 썸네일
-            QRect thumbRect(width() / 2 - 90, y + 4, 36, 36);
-            if (i < top3.size() && !top3[i].photoPath.isEmpty()) {
-                QPixmap pm;
-                if (pm.load(top3[i].photoPath)) {
-                    painter.drawPixmap(thumbRect, pm.scaled(thumbRect.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
-                    painter.setPen(QPen(medalColors[i], 2));
-                    painter.setBrush(Qt::NoBrush);
-                    painter.drawRect(thumbRect);
-                } else {
-                    painter.setPen(QPen(QColor(100, 100, 100), 1));
-                    painter.setBrush(QColor(60, 60, 60, 150));
-                    painter.drawRect(thumbRect);
-                }
->>>>>>> befa44f0ff6e5051015b09b2a6123ecd6f67b5eb
             } else {
                 top3 = m_ranking->getTop3(RankingManager::Single);
             }
 
-            int rankStartY = scoreAreaY + 105;
+            int rankStartY = 215;
             painter.setFont(QFont("Arial", 16, QFont::Bold));
             painter.setPen(QColor(200, 200, 200));
             painter.drawText(QRect(0, rankStartY - 25, width(), 20), Qt::AlignCenter, "- TOP 3 -");
