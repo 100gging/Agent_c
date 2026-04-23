@@ -103,6 +103,10 @@ private slots:
     void onFireReceived();
     void onStateReceived(const QString &stateData);
 
+    // TCP 게임플레이: 클라이언트 일시정지/재개
+    void onPeerPauseReceived();
+    void onPeerResumeReceived();
+
 public:
     void setNetworkManager(NetworkManager *nm);
     /** 싱글 모드일 때 BGM 즉시 재생 (네트워크 모드는 접속 동기화 후 재생) */
@@ -242,6 +246,9 @@ private:
 
     NetworkManager *m_network;
     bool m_waitingForPeer;
+
+    // 클라이언트 Settings 진입 시 서버 일시정지 플래그
+    bool m_peerPaused;
 
     // 멀티플레이어 게임플레이
     QPoint m_peerAimPos;

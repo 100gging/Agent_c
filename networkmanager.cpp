@@ -336,6 +336,16 @@ void NetworkManager::processMessages(QTcpSocket *socket, bool isFromClient)
                 emit syncBgm();
                 qDebug() << "[Server] GO_BGM 전송 (양쪽 메뉴 도착)";
             }
+
+        } else if (msg == "PAUSE" && isFromClient) {
+            // 서버: 클라이언트가 Settings 진입 → 게임 일시정지
+            qDebug() << "[Server] PAUSE 수신 → 게임 일시정지";
+            emit pauseReceived();
+
+        } else if (msg == "RESUME" && isFromClient) {
+            // 서버: 클라이언트가 Settings 복귀 → 게임 재개
+            qDebug() << "[Server] RESUME 수신 → 게임 재개";
+            emit resumeReceived();
         }
     }
 }
@@ -580,5 +590,31 @@ void NetworkManager::sendMenuBgm()
             m_socket->flush();
             qDebug() << "[Client] MENU_BGM 전송";
         }
+    }
+}
+
+// =====================================================================
+// sendPause(): 클라이언트 → 서버: 일시정지 요청 (Settings 진입)
+// =====================================================================
+void NetworkManager::sendPause()
+{
+    if (m_role != Client) return;
+    if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+        m_socket->write("PAUSE\n");
+        m_socket->flush();
+        qDebug() << "[Client] PAUSE 전송";
+    }
+}
+
+// =====================================================================
+// sendResume(): 클라이언트 → 서버: 재개 요청 (Settings 복귀)
+// =====================================================================
+void NetworkManager::sendResume()
+{
+    if (m_role != Client) return;
+    if (m_socket && m_socket->state() == QAbstractSocket::ConnectedState) {
+        m_socket->write("RESUME\n");
+        m_socket->flush();
+        qDebug() << "[Client] RESUME 전송";
     }
 }

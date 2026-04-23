@@ -62,6 +62,7 @@ MainWindow::MainWindow(QWidget *parent)
       m_sensorReady(false),
       m_network(nullptr),
       m_waitingForPeer(false),
+      m_peerPaused(false),
       m_serverScore(0),
       m_clientScore(0),
       m_clientFirePending(false),
@@ -1145,6 +1146,8 @@ void MainWindow::paintEvent(QPaintEvent *event)
     int remainingTimeMs;
     if (m_network && m_network->role() == NetworkManager::Client)
         remainingTimeMs = m_remoteRemainMs;
+    else if (m_peerPaused)
+        remainingTimeMs = pausedRemainingMs;
     else
         remainingTimeMs = qMax(0, gameDurationMs - (int)gameElapsed.elapsed());
     painter.setPen(Qt::white);
@@ -1649,6 +1652,13 @@ void MainWindow::gameLoop()
         return;
     }
 
+    // 클라이언트가 Settings 진입으로 일시정지된 상태
+    if (m_peerPaused) {
+        fireEffect = false;
+        update();
+        return;
+    }
+
     // 서버 또는 단독 모드
     int remainingMs = gameDurationMs - (int)gameElapsed.elapsed();
     if (remainingMs <= 0) {
@@ -1807,6 +1817,9 @@ void MainWindow::onGpioPressed()
             if (prevState == Playing) {
                 gameDurationMs = pausedRemainingMs;
                 gameElapsed.restart();
+                // 클라이언트: Settings 복귀 시 서버에 RESUME 전송
+                if (m_network && m_network->role() == NetworkManager::Client && m_network->isConnected())
+                    m_network->sendResume();
             }
             updateButtonLayout();
         } else {
@@ -1814,6 +1827,9 @@ void MainWindow::onGpioPressed()
             if (prevState == Playing) {
                 gameDurationMs = pausedRemainingMs;
                 gameElapsed.restart();
+                // 클라이언트: Settings 복귀 시 서버에 RESUME 전송
+                if (m_network && m_network->role() == NetworkManager::Client && m_network->isConnected())
+                    m_network->sendResume();
             }
             updateButtonLayout();
         }
@@ -1961,8 +1977,13 @@ void MainWindow::onSw3Pressed()
     } else if (gameState != TakingPhoto) {
         prevState = gameState;
         if (gameState == Playing) {
-            pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
-            if (pausedRemainingMs < 0) pausedRemainingMs = 0;
+            if (!m_peerPaused) {
+                pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
+                if (pausedRemainingMs < 0) pausedRemainingMs = 0;
+            }
+            // 클라이언트: Settings 진입 시 서버에 PAUSE 전송
+            if (m_network && m_network->role() == NetworkManager::Client && m_network->isConnected())
+                m_network->sendPause();
         }
         settingsCursor = 0;
         gameState = Settings;
@@ -1993,6 +2014,10 @@ void MainWindow::setNetworkManager(NetworkManager *nm)
             this,      &MainWindow::onStateReceived);
     connect(m_network, &NetworkManager::modeReceived,
             this,      &MainWindow::onModeReceived);
+    connect(m_network, &NetworkManager::pauseReceived,
+            this,      &MainWindow::onPeerPauseReceived);
+    connect(m_network, &NetworkManager::resumeReceived,
+            this,      &MainWindow::onPeerResumeReceived);
 
     // 상대 사진 수신 처리 (서버←클라이언트, 클라이언트←서버 양방향)
     connect(m_network, &NetworkManager::photoReceived,
@@ -2402,7 +2427,8 @@ int MainWindow::processHitForPlayer(QPoint aim, bool isServer)
 // =====================================================================
 QString MainWindow::buildStateString(int hitCode)
 {
-    int remainMs = qMax(0, gameDurationMs - (int)gameElapsed.elapsed());
+    int remainMs = m_peerPaused ? pausedRemainingMs
+                                 : qMax(0, gameDurationMs - (int)gameElapsed.elapsed());
     // hitCode 5 = host killed blackgatmon (client gets enemy_attack)
     // hitCode 6 = client killed blackgatmon (host gets enemy_attack)
     QString s = QString("%1 %2 %3 %4 %5 %6 %7 %8 %9")
@@ -2526,6 +2552,34 @@ void MainWindow::onStateReceived(const QString &stateData)
     update();
 }
 
+// =====================================================================
+// onPeerPauseReceived(): 서버 — 클라이언트가 Settings 진입 시 게임 일시정지
+// =====================================================================
+void MainWindow::onPeerPauseReceived()
+{
+    if (gameState == Playing) {
+        pausedRemainingMs = gameDurationMs - (int)gameElapsed.elapsed();
+        if (pausedRemainingMs < 0) pausedRemainingMs = 0;
+    }
+    m_peerPaused = true;
+    qDebug() << "[MainWindow] 클라이언트 PAUSE → 게임 일시정지 (남은:" << pausedRemainingMs << "ms)";
+}
+
+// =====================================================================
+// onPeerResumeReceived(): 서버 — 클라이언트가 Settings 복귀 시 게임 재개
+// =====================================================================
+void MainWindow::onPeerResumeReceived()
+{
+    if (m_peerPaused) {
+        m_peerPaused = false;
+        if (gameState == Playing) {
+            gameDurationMs = pausedRemainingMs;
+            gameElapsed.restart();
+        }
+        qDebug() << "[MainWindow] 클라이언트 RESUME → 게임 재개 (남은:" << pausedRemainingMs << "ms)";
+    }
+}
+
 void MainWindow::clampAim()
 {
     int leftBound = 0;
@@ -2556,6 +2610,7 @@ void MainWindow::resetGame()
     m_pendingHitCode = 0;
     m_remoteRemainMs = 30000;
     m_remoteTargets.clear();
+    m_peerPaused = false;
     m_rankingSaved = false;
     resetTargets();
 }

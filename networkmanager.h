@@ -86,6 +86,11 @@ public:
     /** 메뉴 복귀 시 BGM 동기화 요청 전송 */
     void sendMenuBgm();
 
+    /** 클라이언트 → 서버: 일시정지 요청 (클라이언트가 Settings 진입 시) */
+    void sendPause();
+    /** 클라이언트 → 서버: 재개 요청 (클라이언트가 Settings 복귀 시) */
+    void sendResume();
+
 signals:
     /**
      * @brief 상대방이 READY를 전송했을 때 emit.
@@ -120,6 +125,10 @@ signals:
     void coopRankingReceived(const QString &jsonData);
     /** BGM 동기 재생 시그널 (양쪽 동시) */
     void syncBgm();
+    /** 서버: 클라이언트가 PAUSE 요청 시 emit */
+    void pauseReceived();
+    /** 서버: 클라이언트가 RESUME 요청 시 emit */
+    void resumeReceived();
 
 private slots:
     // [서버 전용] 새 클라이언트 접속 처리
