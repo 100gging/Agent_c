@@ -4,7 +4,7 @@
 #include <QCommandLineParser>
 #include <QDebug>
 #include <csignal>
-
+// 연습용 주석 추가
 // SIGINT/SIGTERM 시 깔끔한 종료 (소켓 해제 → TIME_WAIT 방지)
 static void signalHandler(int)
 {
